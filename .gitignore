@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Archivos grandes que no deben subirse
+data/datos.json
+data/
