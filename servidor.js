@@ -1,16 +1,25 @@
-const express = require("express");
-const cors = require("cors");
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import conectarDB from "./conexion/db.js";
+import jobRoutes from "./rutas/job.routes.js";
+
+dotenv.config();
 
 const app = express();
-const puerto = process.env.PUERTO || 5000;
+const PORT = process.env.PORT || 8000;
 
 app.use(cors());
 app.use(express.json());
 
+conectarDB();
+
+app.use("/api/jobs", jobRoutes);
+
 app.get("/", (req, res) => {
-    res.json({ msg: "Backend iniciado" });
+    res.json({ message: "Backend iniciado correctamente" });
 });
 
-app.listen(puerto, () => {
-    console.log(`Servidor corriendo en http://localhost:${puerto}`);
+app.listen(PORT, () => {
+    console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
