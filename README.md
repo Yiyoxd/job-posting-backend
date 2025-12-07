@@ -44,21 +44,21 @@ La estructura actual del backend es la siguiente:
 
 ```bash
 backend/
-├── servidor.js          # Punto de entrada del servidor Express
+├── server.js          # Punto de entrada del servidor Express
 ├── package.json         # Configuración del proyecto y scripts de npm
 ├── package-lock.json    # Detalle de las dependencias instaladas (generado por npm)
 ├── .env                 # Variables de entorno (NO se sube a Git)
 ├── .gitignore           # Archivos y carpetas que Git debe ignorar
 ├── rutas/               # Rutas de la API (endpoints)
-├── modelos/             # Modelos de datos (p. ej. Usuario, Vacante, Empresa)
-├── controladores/       # Lógica de negocio para cada ruta
+├── models/             # Modelos de datos (p. ej. Usuario, Vacante, Empresa)
+├── controllers/       # Lógica de negocio para cada ruta
 ├── middleware/          # Middlewares (autenticación, manejo de errores, etc.)
-└── conexion/            # Módulo de conexión a la base de datos
+└── conection/            # Módulo de conexión a la base de datos
 ```
 
 ### Explicación por carpeta
 
-- **`servidor.js`**  
+- **`server.js`**  
   Archivo principal donde se:
   - Crea la aplicación de Express.
   - Configuran middlewares globales (`cors`, `express.json`, etc.).
@@ -140,7 +140,7 @@ Esto instalará todas las dependencias definidas en `package.json` y generará `
 
 ### 3️⃣ Crear archivo `.env`
 
-En la raíz del backend (donde está `servidor.js`), crea un archivo llamado `.env`:
+En la raíz del backend (donde está `server.js`), crea un archivo llamado `.env`:
 
 ```env
 PUERTO=5000
@@ -164,7 +164,7 @@ npm run dev
 Si todo está correcto, deberías ver en la terminal algo como:
 
 ```bash
-[nodemon] starting `node servidor.js`
+[nodemon] starting `node server.js`
 Servidor corriendo en http://localhost:5000
 ```
 
@@ -190,8 +190,8 @@ Respuesta esperada (actualmente):
 
 ```json
 "scripts": {
-  "start": "node servidor.js",
-  "dev": "nodemon servidor.js"
+  "start": "node server.js",
+  "dev": "nodemon server.js"
 }
 ```
 
@@ -251,7 +251,7 @@ La idea es que, cuando ocurra un error en cualquier parte de la API, se devuelva
 }
 ```
 
-Este comportamiento se implementará en `middleware/errorMiddleware.js` y se registrará en `servidor.js` con:
+Este comportamiento se implementará en `middleware/errorMiddleware.js` y se registrará en `server.js` con:
 
 ```js
 app.use(errorHandler);

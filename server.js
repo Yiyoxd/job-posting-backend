@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import conectarDB from "./conexion/db.js";
+import conectarDB from "./conection/db.js";
 import jobRoutes from "./rutas/job.routes.js";
 
 dotenv.config();

@@ -2,11 +2,11 @@ import fs from "fs";
 import path from "path";
 import readline from "readline";
 
-import Job from "../modelos/Job.js";
-import Company from "../modelos/Company.js";
-import EmployeeCount from "../modelos/EmployeeCount.js";
+import Job from "../models/Job.js";
+import Company from "../models/Company.js";
+import EmployeeCount from "../models/EmployeeCount.js";
 
-import { conectarDB } from "../conexion/db.js";
+import { conectarDB } from "../conection/db.js";
 
 const __dirname = path.resolve();
 const rutaDatos = path.join(__dirname, "data", "datos.json");
@@ -33,7 +33,7 @@ const progreso = (actual, total) => {
     process.stdout.write(`\r${visual} ${porcentaje}%  (${actual}/${total})`);
 };
 
-const importarDatos = async () => {
+const impotData = async () => {
     try {
         await conectarDB();
 
@@ -123,4 +123,4 @@ const importarDatos = async () => {
     }
 };
 
-importarDatos();
+impotData();

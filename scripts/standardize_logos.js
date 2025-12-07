@@ -8,8 +8,8 @@ const path = require("path");
 const sharp = require("sharp");
 const { estandarizarLogo } = require("../utils/imageProcessor");
 
-const INPUT_DIR = path.join(__dirname, "..", "imagenes/logos");
-const OUTPUT_DIR = path.join(__dirname, "..", "imagenes/logos200x200");
+const INPUT_DIR = path.join(__dirname, "..", "images/logos");
+const OUTPUT_DIR = path.join(__dirname, "..", "images/logos200x200");
 
 async function procesarTodos() {
     const archivos = fs.readdirSync(INPUT_DIR);

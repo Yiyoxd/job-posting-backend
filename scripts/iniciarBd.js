@@ -18,14 +18,14 @@ const run = async () => {
 
         // Importar datos con flag --auto (borra sin preguntar)
         await ejecutarScript(
-            path.join(__dirname, "scripts", "importarDatos.js"),
+            path.join(__dirname, "scripts", "impotData.js"),
             ["--auto"]
         );
 
         console.log("\n⚙️  Creando índices…\n");
 
         await ejecutarScript(
-            path.join(__dirname, "scripts", "crearIndices.js")
+            path.join(__dirname, "scripts", "createIndices.js")
         );
 
         console.log("\n🎉 Proceso completo: datos importados + índices creados\n");

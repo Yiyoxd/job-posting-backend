@@ -1,13 +1,13 @@
-import { conectarDB } from "../conexion/db.js";
-import Job from "../modelos/Job.js";
-import Company from "../modelos/Company.js";
-import EmployeeCount from "../modelos/EmployeeCount.js";
+import { conectarDB } from "../conection/db.js";
+import Job from "../models/Job.js";
+import Company from "../models/Company.js";
+import EmployeeCount from "../models/EmployeeCount.js";
 
 const log = (msg) => console.log(`   • ${msg}`);
 const ok = (msg) => console.log(`✔ ${msg}`);
 const fail = (msg) => console.log(`❌ ${msg}`);
 
-const crearIndices = async () => {
+const createIndices = async () => {
     const t0 = Date.now();
 
     try {
@@ -56,4 +56,4 @@ const crearIndices = async () => {
     }
 };
 
-crearIndices();
+createIndices();
