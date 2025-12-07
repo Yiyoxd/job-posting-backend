@@ -49,11 +49,11 @@ backend/
 ├── package-lock.json    # Detalle de las dependencias instaladas (generado por npm)
 ├── .env                 # Variables de entorno (NO se sube a Git)
 ├── .gitignore           # Archivos y carpetas que Git debe ignorar
-├── rutas/               # Rutas de la API (endpoints)
+├── routes/               # Rutas de la API (endpoints)
 ├── models/             # Modelos de datos (p. ej. Usuario, Vacante, Empresa)
 ├── controllers/       # Lógica de negocio para cada ruta
 ├── middleware/          # Middlewares (autenticación, manejo de errores, etc.)
-└── conection/            # Módulo de conexión a la base de datos
+└── connection/            # Módulo de conexión a la base de datos
 ```
 
 ### Explicación por carpeta

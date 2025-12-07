@@ -1,53 +1,41 @@
+import sharp from "sharp";
+import path from "path";
+import fs from "fs";
+
+const DEFAULT_SIZE = 200;
+
 /**
- * Procesa y estandariza un logo a un tamaño cuadrado (PNG con transparencia).
- * Valida que el archivo sea una imagen real antes de procesarlo.
+ * Standardizes an input logo into a square transparent PNG of the given size.
  */
-
-const sharp = require("sharp");
-const path = require("path");
-const fs = require("fs");
-const SIZE = 200;
-
-async function estandarizarLogo(inputPath, outputDir, size = SIZE) {
-    // Crear carpeta de salida si no existe
+export async function standardizeLogo(inputPath, outputDir, size = DEFAULT_SIZE, outputName) {
     if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir, { recursive: true });
     }
 
-    // Validar que el archivo sea una imagen real
-    try {
-        await sharp(inputPath).metadata();
-    } catch {
-        throw new Error("Archivo no válido o imagen corrupta.");
-    }
+    // Validate the file is a real image
+    await sharp(inputPath).metadata();
 
-    const outputName = `logo_${Date.now()}.png`;
-    const outputPath = path.join(outputDir, outputName);
+    const finalName = outputName ?? `logo_${Date.now()}.png`;
+    const outputPath = path.join(outputDir, finalName);
 
-    // Crear un canvas cuadrado transparente y centrar el logo redimensionado
+    const resized = await sharp(inputPath)
+        .resize(size, size, {
+            fit: "contain",
+            background: { r: 255, g: 255, b: 255, alpha: 0 },
+        })
+        .toBuffer();
+
     await sharp({
         create: {
             width: size,
             height: size,
             channels: 4,
-            background: { r: 255, g: 255, b: 255, alpha: 0 }
-        }
+            background: { r: 255, g: 255, b: 255, alpha: 0 },
+        },
     })
-        .composite([
-            {
-                input: await sharp(inputPath)
-                    .resize(size, size, {
-                        fit: "contain",
-                        background: { r: 255, g: 255, b: 255, alpha: 0 }
-                    })
-                    .toBuffer(),
-                gravity: "center"
-            }
-        ])
+        .composite([{ input: resized, gravity: "center" }])
         .png()
         .toFile(outputPath);
 
     return outputPath;
 }
-
-module.exports = { estandarizarLogo };

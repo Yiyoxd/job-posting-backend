@@ -1,8 +1,8 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import conectarDB from "./conection/db.js";
-import jobRoutes from "./rutas/job.routes.js";
+import {connectDB} from "./connection/db.js";
+import jobRoutes from "./routes/job.routes.js";
 
 dotenv.config();
 
@@ -12,14 +12,14 @@ const PORT = process.env.PORT || 8000;
 app.use(cors());
 app.use(express.json());
 
-conectarDB();
+connectDB();
 
 app.use("/api/jobs", jobRoutes);
 
 app.get("/", (req, res) => {
-    res.json({ message: "Backend iniciado correctamente" });
+    res.json({ message: "Backend started successfully" });
 });
 
 app.listen(PORT, () => {
-    console.log(`Servidor corriendo en http://localhost:${PORT}`);
+    console.log(`Server running at http://localhost:${PORT}`);
 });
