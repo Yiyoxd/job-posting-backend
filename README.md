@@ -1,4 +1,3 @@
-````markdown
 # 🏢 Job Posting Backend – Proyecto Final Full Stack
 
 Este repositorio contiene el **backend** del proyecto **Job Posting**, desarrollado como **proyecto final de la materia de Full Stack**.  
@@ -55,48 +54,43 @@ backend/
 ├── controladores/       # Lógica de negocio para cada ruta
 ├── middleware/          # Middlewares (autenticación, manejo de errores, etc.)
 └── conexion/            # Módulo de conexión a la base de datos
-````
+```
 
 ### Explicación por carpeta
 
-* **`servidor.js`**
+- **`servidor.js`**  
   Archivo principal donde se:
+  - Crea la aplicación de Express.
+  - Configuran middlewares globales (`cors`, `express.json`, etc.).
+  - Definen rutas base.
+  - Levanta el servidor en el puerto configurado.
 
-  * Crea la aplicación de Express.
-  * Configuran middlewares globales (`cors`, `express.json`, etc.).
-  * Definen rutas base.
-  * Levanta el servidor en el puerto configurado.
-
-* **`rutas/`**
+- **`rutas/`**  
   Aquí irán archivos como:
+  - `usuariosRutas.js`
+  - `vacantesRutas.js`
+  - `postulacionesRutas.js`  
+  Cada archivo define los endpoints y los enlaza con sus controladores.
 
-  * `usuariosRutas.js`
-  * `vacantesRutas.js`
-  * `postulacionesRutas.js`
-    Cada archivo define los endpoints y los enlaza con sus controladores.
-
-* **`modelos/`**
+- **`modelos/`**  
   Aquí se definirán los esquemas de MongoDB usando Mongoose, por ejemplo:
+  - `Usuario.js`
+  - `Empresa.js`
+  - `Vacante.js`
+  - `Postulacion.js`
 
-  * `Usuario.js`
-  * `Empresa.js`
-  * `Vacante.js`
-  * `Postulacion.js`
-
-* **`controladores/`**
+- **`controladores/`**  
   Contendrá la lógica de negocio, por ejemplo:
+  - `usuariosController.js`
+  - `vacantesController.js`  
+  Cada función se asociará a una ruta específica (crear usuario, listar vacantes, etc.).
 
-  * `usuariosController.js`
-  * `vacantesController.js`
-    Cada función se asociará a una ruta específica (crear usuario, listar vacantes, etc.).
-
-* **`middleware/`**
+- **`middleware/`**  
   Aquí se colocarán middlewares reutilizables:
+  - `errorMiddleware.js` – manejo centralizado de errores.
+  - `authMiddleware.js` – verificación de JWT cuando se implemente autenticación.
 
-  * `errorMiddleware.js` – manejo centralizado de errores.
-  * `authMiddleware.js` – verificación de JWT cuando se implemente autenticación.
-
-* **`conexion/`**
+- **`conexion/`**  
   Módulo que se encargará de conectarse a la base de datos (por ejemplo, `dbConexion.js` con Mongoose).
 
 ---
@@ -105,20 +99,20 @@ backend/
 
 Antes de clonar y ejecutar el proyecto necesitas:
 
-* **Node.js** (versión recomendada: 18.x o superior)
+- **Node.js** (versión recomendada: 18.x o superior)  
   Verificar versión:
 
   ```bash
   node -v
   ```
 
-* **npm** (se instala junto con Node):
+- **npm** (se instala junto con Node):
 
   ```bash
   npm -v
   ```
 
-* (Más adelante) **Instancia de MongoDB** local o en la nube, cuando se configure la base de datos.
+- (Más adelante) **Instancia de MongoDB** local o en la nube, cuando se configure la base de datos.
 
 ---
 
@@ -178,7 +172,7 @@ Servidor corriendo en http://localhost:5000
 
 Abrir el navegador o una herramienta como Postman e ingresar:
 
-* **GET** `http://localhost:5000/`
+- **GET** `http://localhost:5000/`
 
 Respuesta esperada (actualmente):
 
@@ -201,10 +195,10 @@ Respuesta esperada (actualmente):
 }
 ```
 
-* **`npm start`**
+- **`npm start`**  
   Ejecuta el servidor una sola vez con Node (modo producción/simple).
 
-* **`npm run dev`**
+- **`npm run dev`**  
   Ejecuta el servidor con `nodemon`, reiniciándolo automáticamente al detectar cambios en los archivos `.js`.
 
 ---
@@ -215,43 +209,39 @@ Aunque todavía no se ha implementado la lógica completa, la idea general de la
 
 ### Entidades principales
 
-* **Usuario**
+- **Usuario**
+  - Registro y autenticación (JWT).
+  - Datos básicos del perfil.
+  - Tipos de usuario (por ejemplo: candidato, empresa, admin).
 
-  * Registro y autenticación (JWT).
-  * Datos básicos del perfil.
-  * Tipos de usuario (por ejemplo: candidato, empresa, admin).
+- **Empresa**
+  - Información básica de la empresa.
+  - Relación con las vacantes que publica.
 
-* **Empresa**
+- **Vacante**
+  - Información de un puesto de trabajo (título, descripción, salario, ubicación, tipo de contrato, etc.).
+  - Publicada por una empresa.
 
-  * Información básica de la empresa.
-  * Relación con las vacantes que publica.
-
-* **Vacante**
-
-  * Información de un puesto de trabajo (título, descripción, salario, ubicación, tipo de contrato, etc.).
-  * Publicada por una empresa.
-
-* **Postulación**
-
-  * Relación entre un usuario y una vacante.
-  * Estado de la postulación (en revisión, aceptado, rechazado, etc.).
+- **Postulación**
+  - Relación entre un usuario y una vacante.
+  - Estado de la postulación (en revisión, aceptado, rechazado, etc.).
 
 ### Ejemplos de endpoints planeados
 
 > *Nota: Esto es el diseño conceptual. La implementación se hará conforme avance el desarrollo.*
 
-* `POST /api/usuarios/registro` – Registrar nuevo usuario.
-* `POST /api/usuarios/login` – Iniciar sesión y obtener token JWT.
-* `GET  /api/vacantes` – Listar vacantes disponibles.
-* `POST /api/vacantes` – Crear vacante (solo empresas o admin).
-* `POST /api/postulaciones` – Un usuario aplica a una vacante.
-* `GET  /api/postulaciones/mias` – Ver postulaciones del usuario autenticado.
+- `POST /api/usuarios/registro` – Registrar nuevo usuario.
+- `POST /api/usuarios/login` – Iniciar sesión y obtener token JWT.
+- `GET  /api/vacantes` – Listar vacantes disponibles.
+- `POST /api/vacantes` – Crear vacante (solo empresas o admin).
+- `POST /api/postulaciones` – Un usuario aplica a una vacante.
+- `GET  /api/postulaciones/mias` – Ver postulaciones del usuario autenticado.
 
 ---
 
 ## 🧱 Manejo de Errores (Planeado)
 
-Se utilizará un middleware centralizado para manejar errores.
+Se utilizará un middleware centralizado para manejar errores.  
 La idea es que, cuando ocurra un error en cualquier parte de la API, se devuelva una respuesta con formato consistente, por ejemplo:
 
 ```json
@@ -273,9 +263,9 @@ app.use(errorHandler);
 
 Más adelante se integrará:
 
-* **JWT (JSON Web Tokens)** para autenticación.
-* **bcryptjs** para hash de contraseñas.
-* Middlewares tipo `authMiddleware` para proteger rutas:
+- **JWT (JSON Web Tokens)** para autenticación.
+- **bcryptjs** para hash de contraseñas.
+- Middlewares tipo `authMiddleware` para proteger rutas:
 
 ```js
 // Ejemplo conceptual
@@ -290,24 +280,24 @@ Donde `protegerRuta` validará el token enviado en los headers.
 
 El backend está pensado para ser consumido por un **frontend** (por ejemplo, en React), que hará peticiones HTTP a los endpoints de esta API:
 
-* Uso de `fetch` o `axios` desde el frontend.
-* Configuración de CORS desde el backend (`app.use(cors())`) para permitir el dominio del frontend.
+- Uso de `fetch` o `axios` desde el frontend.
+- Configuración de CORS desde el backend (`app.use(cors())`) para permitir el dominio del frontend.
 
 ---
 
 ## 📌 Estado Actual del Proyecto
 
-* ✅ Servidor básico en Express funcionando.
-* ✅ Estructura de carpetas organizada para un backend profesional.
-* ✅ Dependencias principales instaladas y configuradas.
-* ⏳ Pendiente: implementación de modelos, controladores, rutas reales y autenticación.
-* ⏳ Pendiente: conexión real a MongoDB mediante Mongoose.
+- ✅ Servidor básico en Express funcionando.
+- ✅ Estructura de carpetas organizada para un backend profesional.
+- ✅ Dependencias principales instaladas y configuradas.
+- ⏳ Pendiente: implementación de modelos, controladores, rutas reales y autenticación.
+- ⏳ Pendiente: conexión real a MongoDB mediante Mongoose.
 
 Este README sirve como **guía de referencia** para cualquier persona (profesor, revisor o compañero) que necesite:
 
-* Entender la estructura del backend.
-* Levantar el proyecto en su propia máquina.
-* Continuar la implementación de las funcionalidades.
+- Entender la estructura del backend.
+- Levantar el proyecto en su propia máquina.
+- Continuar la implementación de las funcionalidades.
 
 ---
 
@@ -315,14 +305,11 @@ Este README sirve como **guía de referencia** para cualquier persona (profesor,
 
 Proyecto desarrollado por:
 
-* **Alfredo Palacios** – [@Yiyoxd](https://github.com/Yiyoxd)
-* **Daniela Aldaco** – [@danielaaldaco](https://github.com/danielaaldaco)
-* **Sofía Gutiérrez** – [@soofigw](https://github.com/soofigw)
+- **Alfredo Palacios** – [@Yiyoxd](https://github.com/Yiyoxd)
+- **Daniela Aldaco** – [@danielaaldaco](https://github.com/danielaaldaco)
+- **Sofía Gutiérrez** – [@soofigw](https://github.com/soofigw)
 
-Materia: **Full Stack**
-Institución: **Instituto Tecnológico de la laguna**
+Materia: **Full Stack**  
+Institución: **Instituto Tecnológico de la Laguna**
 
 ---
-
-```
-```
