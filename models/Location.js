@@ -1,26 +1,44 @@
 import mongoose from "mongoose";
 
+/**
+ * Location — Esquema en forma de ÁRBOL.
+ *
+ * Cada documento representa UN PAÍS completo.
+ *
+ * {
+ *   country: "Mexico",
+ *   states: [
+ *     {
+ *       state: "Coahuila",
+ *       cities: ["Torreón", "Saltillo"]
+ *     },
+ *     ...
+ *   ]
+ * }
+ */
+
 const LocationSchema = new mongoose.Schema({
-    _id: String, // C-1, S-22, CI-991
-    type: {
-        type: String,
-        enum: ["country", "state", "city"],
-        required: true,
-    },
-    name: {
+    country: {
         type: String,
         required: true,
-        index: true,
         trim: true,
+        index: true,
+        unique: true
     },
-    country_id: {
-        type: String,
-        default: null,
-    },
-    state_id: {
-        type: String,
-        default: null,
-    },
+
+    states: [
+        {
+            state: {
+                type: String,
+                required: true,
+                trim: true
+            },
+            cities: {
+                type: [String],
+                default: [],
+            }
+        }
+    ]
 });
 
 export default mongoose.model("Location", LocationSchema);

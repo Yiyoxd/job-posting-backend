@@ -43,7 +43,7 @@ const prompt = createPromptFromArgs(process.argv);
 const __dirname = path.resolve();
 
 // Cambia tu archivo si usas otro
-const FILE_PATH = path.join(__dirname, "data", "full_export2.json");
+const FILE_PATH = path.join(__dirname, "data", "jobs.json");
 
 // Tamaño de lote para inserciones
 const CHUNK_SIZE = 2000;

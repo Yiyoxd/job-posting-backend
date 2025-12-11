@@ -4,13 +4,12 @@ const jobSchema = new mongoose.Schema({
     job_id: {
         type: String,
         trim: true,
-        index: true // el unique lo creas después en tu script
+        index: true
     },
 
     title: {
         type: String,
         trim: true
-        // el índice de texto se crea en el script, NO aquí
     },
 
     description: String,
