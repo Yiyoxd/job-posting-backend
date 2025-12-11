@@ -47,9 +47,9 @@ function computeScore(text, query) {
 }
 
 /* ============================================================================ */
-/* collectMatchesHeap — Búsqueda con MinHeap (TOP-K más rápido) */
+/* collectMatches — Búsqueda con MinHeap*/
 /* ============================================================================ */
-function collectMatchesHeap(docs, query, k) {
+function collectMatches(docs, query, k) {
     const qNorm = normalize(query);
     const heap = new MinHeap(k);
 
@@ -159,7 +159,7 @@ export async function searchLocations(req, res) {
         const docs = getAllLocations();
 
         // TOP-K eficiente usando MinHeap
-        const results = collectMatchesHeap(docs, q, k);
+        const results = collectMatches(docs, q, k);
 
         // Limpia score antes de enviar
         const cleaned = results.map(({ score, ...rest }) => rest);

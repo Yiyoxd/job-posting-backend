@@ -24,5 +24,4 @@ dist-ssr
 *.sw?
 
 # Archivos grandes que no deben subirse
-data/dataset_jobs.json
 data/

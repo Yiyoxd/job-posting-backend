@@ -11,18 +11,19 @@
  *   - title, description
  *   - salario: min, max, currency, normalized
  *   - ubicación: country, state, city
- *   - metadata: work_type, listed_time
+ *   - metadata: work_type, work_location_type, listed_time
  *
  * Índices:
  *   - job_id (búsqueda directa)
  *   - listed_time (orden cronológico)
  *   - country (filtros por región)
  *   - company_id (JOIN lógico)
+ *   - work_location_type (filtrado rápido remoto/híbrido/presencial)
  *
  * Este modelo se utiliza en:
  *   ✔ jobController.js
  *   ✔ insertData.js (importador masivo)
- *   ✔ filtros por ubicación
+ *   ✔ filtros por ubicación y modalidad
  * ============================================================================
  */
 
@@ -61,8 +62,15 @@ const jobSchema = new mongoose.Schema({
         index: true
     },
 
-    // Tipo de trabajo (full-time, contract, remote, etc.)
+    // Tipo de trabajo (FULL_TIME, PART_TIME, CONTRACT...)
     work_type: String,
+
+    // NUEVO: modalidad del trabajo (REMOTE / ONSITE / HYBRID)
+    work_location_type: {
+        type: String,
+        enum: ["ONSITE", "HYBRID", "REMOTE"],
+        index: true
+    },
 
     // Normalización numérica usada para análisis estadístico
     normalized_salary: Number,

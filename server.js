@@ -3,8 +3,15 @@ import cors from "cors";
 import dotenv from "dotenv";
 
 import { connectDB } from "./connection/db.js";
+
+// IMPORTA PRIMERO TODOS LOS MODELOS
+import "./models/Company.js";
+import "./models/Job.js";
+import "./models/Location.js";   // si lo tienes
+
+// Luego importa rutas
 import jobRoutes from "./routes/jobRoutes.js";
-import locationRoutes from "./routes/locationRoutes.js";   // ✅ IMPORTANTE
+import locationRoutes from "./routes/locationRoutes.js";
 
 dotenv.config();
 
@@ -20,7 +27,7 @@ connectDB();
 
 // Rutas
 app.use("/api/jobs", jobRoutes);
-app.use("/api/locations", locationRoutes);   // ✅ NUEVA RUTA
+app.use("/api/locations", locationRoutes);
 
 // Ruta base
 app.get("/", (req, res) => {
