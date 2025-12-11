@@ -1,15 +1,18 @@
 /**
  * createIndexes.js
  *
- * Creates indexes for the three primary collections:
- *   - Job
- *   - Company
- *   - EmployeeCount
+ * Crea SOLO los índices que NO están definidos en los modelos.
+ * Esto evita conflictos con índices únicos o simples del schema.
  *
- * This script can be executed on a populated or empty database.
- * Index creation is idempotent and safe to re-run.
+ * Índices creados:
+ *   ✔ Jobs: title (texto)
+ *   ✔ Jobs: ubicaciones (country, state, city)
+ *   ✔ Jobs: rango salarial (min_salary, max_salary)
+ *   ✔ Jobs: listed_time (fecha)
  *
- * Usage:
+ *   ✔ Companies: ubicación (country, state, city)
+ *
+ * Uso:
  *   node scripts/createIndexes.js
  */
 
@@ -18,18 +21,13 @@ import { connectDB } from "../connection/db.js";
 
 import Job from "../models/Job.js";
 import Company from "../models/Company.js";
-import EmployeeCount from "../models/EmployeeCount.js";
 
 import { logger } from "../utils/logger.js";
 
 const __dirname = path.resolve();
 
-/**
- * Helper function to create a single index and log its performance.
- */
-async function createIndex(collection, description, fields, options, results) {
+async function createIndex(collection, description, fields, options = {}, results = []) {
     const start = Date.now();
-
     try {
         await collection.createIndex(fields, options);
         const ms = Date.now() - start;
@@ -37,55 +35,72 @@ async function createIndex(collection, description, fields, options, results) {
         results.push({ description, status: "OK", time: ms });
     } catch (err) {
         logger.error(`${description} — ${err.message}`);
-        results.push({ description, status: "ERROR", time: null });
+        results.push({ description, status: "ERROR" });
     }
 }
 
-/**
- * Main index creation routine.
- */
 async function createIndexes() {
     try {
         await connectDB();
-
-        logger.info("Creating indexes...");
+        logger.section("Creando índices necesarios...");
 
         const results = [];
 
-        // ---------------------------
-        // JOB COLLECTION INDEXES
-        // ---------------------------
-        logger.info("Job collection:");
-        await createIndex(Job.collection, "job_id (unique)", { job_id: 1 }, { unique: true }, results);
-        await createIndex(Job.collection, "company field", { company: 1 }, {}, results);
-        await createIndex(Job.collection, "title (text)", { title: "text" }, {}, results);
+        // --------------------------------------------------
+        // JOBS (solo índices avanzados)
+        // --------------------------------------------------
+        logger.info("Colección jobs:");
+
         await createIndex(
             Job.collection,
-            "location + salary",
-            { location: 1, min_salary: 1, max_salary: 1 },
+            "Índice de texto en título",
+            { title: "text" },
             {},
             results
         );
 
-        // ---------------------------
-        // COMPANY COLLECTION INDEXES
-        // ---------------------------
-        logger.info("Company collection:");
-        await createIndex(Company.collection, "name (text)", { name: "text" }, {}, results);
-        await createIndex(Company.collection, "country + city", { country: 1, city: 1 }, {}, results);
+        await createIndex(
+            Job.collection,
+            "Ubicación (country, state, city)",
+            { country: 1, state: 1, city: 1 },
+            {},
+            results
+        );
 
-        // ---------------------------
-        // EMPLOYEECOUNT COLLECTION INDEXES
-        // ---------------------------
-        logger.info("EmployeeCount collection:");
-        await createIndex(EmployeeCount.collection, "company", { company: 1 }, {}, results);
-        await createIndex(EmployeeCount.collection, "employee_count desc", { employee_count: -1 }, {}, results);
+        await createIndex(
+            Job.collection,
+            "Rango salarial (min_salary, max_salary)",
+            { min_salary: 1, max_salary: 1 },
+            {},
+            results
+        );
 
-        logger.success("Indexes created successfully.");
+        await createIndex(
+            Job.collection,
+            "listed_time (fecha)",
+            { listed_time: -1 },
+            {},
+            results
+        );
+
+        // --------------------------------------------------
+        // COMPANIES (solo índices avanzados)
+        // --------------------------------------------------
+        logger.info("Colección companies:");
+
+        await createIndex(
+            Company.collection,
+            "Ubicación (country, state, city)",
+            { country: 1, state: 1, city: 1 },
+            {},
+            results
+        );
+
+        logger.success("Índices creados exitosamente.");
         process.exit(0);
 
     } catch (error) {
-        logger.error(`createIndexes error: ${error.message}`);
+        logger.error(`Error al crear índices: ${error.message}`);
         process.exit(1);
     }
 }

@@ -108,7 +108,7 @@ async function setup() {
         logger.success("System setup completed.");
 
         // 3. Ask user if they want to run the dev server
-        const runDev = await prompt.confirm("Run `npm run dev` now? (y/n): ");
+        const runDev = await prompt.confirm("Run server now? (y/n): ");
 
         if (runDev) {
             await executor.runNpm("dev");

@@ -1,151 +1,166 @@
 /**
- * insertData.js
+ * =============================================================================
+ *  insertFullExport.js  —  Importador Profesional
+ * =============================================================================
  *
- * Inserts seed data from /data/dataset_jobs.json into MongoDB.
+ *  ✔ Importa un archivo JSON que contiene:
+ *        {
+ *            "companies": [...],
+ *            "jobs": [...]
+ *        }
  *
- * Behaviors:
- *   - Loads dataset from disk.
- *   - Inserts companies, jobs and employee_count entries in batches.
- *   - Uses a ProgressBar for clean CLI feedback.
- *   - Uses Prompt for confirmation unless --auto is passed.
- *   - Uses Logger for structured output.
+ *  ✔ Elimina SOLO:
+ *        - companies
+ *        - jobs
  *
- * Usage:
- *   node scripts/insertData.js
- *   node scripts/insertData.js --auto
+ *  ✔ Inserta usando "chunked inserts" para:
+ *        - evitar bloquear el event loop
+ *        - mejorar la barra de progreso
+ *        - reducir riesgo de stack / RAM issues
+ *
+ *  ✔ Ya NO existe la colección employeeCounts.
+ *
+ *  ✔ Este import NO limpia ni normaliza datos: se asume que el JSON ya viene
+ *    correctamente preparado.
+ *
+ * =============================================================================
  */
 
 import fs from "fs";
 import path from "path";
+import mongoose from "mongoose";
 
-import Job from "../models/Job.js";
 import Company from "../models/Company.js";
-import EmployeeCount from "../models/EmployeeCount.js";
+import Job from "../models/Job.js";
+
 import { connectDB } from "../connection/db.js";
-
 import { logger } from "../utils/logger.js";
-import { createPromptFromArgs } from "../utils/prompt.js";
 import { ProgressBar } from "../utils/progressBar.js";
+import { createPromptFromArgs } from "../utils/prompt.js";
 
-const __dirname = path.resolve();
+// ---------------------------------------------------------
 const prompt = createPromptFromArgs(process.argv);
+const __dirname = path.resolve();
 
-// Dataset location
-const DATASET_PATH = path.join(__dirname, "data", "dataset_jobs.json");
+// Cambia tu archivo si usas otro
+const FILE_PATH = path.join(__dirname, "data", "full_export2.json");
 
-// Insert batch size
-const BATCH_SIZE = 1000;
+// Tamaño de lote para inserciones
+const CHUNK_SIZE = 2000;
+// ---------------------------------------------------------
 
-/**
- * Loads JSON dataset from disk and validates shape.
- */
-function loadDataset() {
-    if (!fs.existsSync(DATASET_PATH)) {
-        throw new Error(`Dataset not found: ${DATASET_PATH}`);
-    }
-
-    const raw = fs.readFileSync(DATASET_PATH, "utf8");
-    const docs = JSON.parse(raw);
-
-    if (!Array.isArray(docs)) {
-        throw new Error("Dataset must be a JSON array.");
-    }
-
-    return docs;
-}
 
 /**
- * Flushes a batch of companies, jobs and employeeCounts to MongoDB.
+ * Elimina únicamente las colecciones objetivo.
  */
-async function flushBatch(batchCompanies, batchJobs, batchEmployeeCounts) {
-    if (batchCompanies.length === 0) return;
+async function limpiarColecciones() {
+    logger.section("Eliminando colecciones objetivo");
 
-    const insertedCompanies = await Company.insertMany(batchCompanies);
+    const confirmado = await prompt.confirm(
+        "Esto ELIMINARÁ 'companies' y 'jobs'. ¿Continuar? (y/N): "
+    );
 
-    const jobsToInsert = batchJobs.map((job) => ({
-        ...job,
-        company: insertedCompanies[job._companyIndex]._id,
-    }));
-
-    const countsToInsert = batchEmployeeCounts.map((c) => ({
-        company: insertedCompanies[c._companyIndex]._id,
-        employee_count: c.employee_count,
-    }));
-
-    await Job.insertMany(jobsToInsert);
-    await EmployeeCount.insertMany(countsToInsert);
-}
-
-/**
- * Main insertion workflow.
- */
-async function insertData() {
-    try {
-        await connectDB();
-
-        const confirmed = await prompt.confirm(
-            "This will INSERT dataset_jobs.json into the database. Continue? (y/n): "
-        );
-
-        if (!confirmed) {
-            logger.info("Process cancelled.");
-            process.exit(0);
-        }
-
-        const docs = loadDataset();
-        if (docs.length === 0) {
-            logger.warn("Dataset is empty. Nothing to insert.");
-            process.exit(0);
-        }
-
-        logger.info("Preparing batch insertion...");
-        const progress = new ProgressBar(docs.length);
-
-        let batchCompanies = [];
-        let batchJobs = [];
-        let batchEmployeeCounts = [];
-
-        let index = 0;
-
-        for (const doc of docs) {
-            const companyIndex = batchCompanies.length;
-
-            batchCompanies.push({ ...doc.company });
-
-            for (const emp of doc.company_employee_counts) {
-                batchEmployeeCounts.push({
-                    employee_count: emp.employee_count,
-                    _companyIndex: companyIndex,
-                });
-            }
-
-            batchJobs.push({
-                ...doc.job,
-                _companyIndex: companyIndex,
-            });
-
-            index++;
-            progress.update(index);
-
-            const lastBatch = index === docs.length;
-            const fullBatch = index % BATCH_SIZE === 0;
-
-            if (fullBatch || lastBatch) {
-                await flushBatch(batchCompanies, batchJobs, batchEmployeeCounts);
-                batchCompanies = [];
-                batchJobs = [];
-                batchEmployeeCounts = [];
-            }
-        }
-
-        progress.finish();
-        logger.success("Dataset inserted successfully.");
+    if (!confirmado) {
+        logger.warn("Operación cancelada por el usuario.");
         process.exit(0);
+    }
 
-    } catch (err) {
-        logger.error(`insertData error: ${err.message}`);
-        process.exit(1);
+    const coleccionesObjetivo = ["companies", "jobs"];
+
+    for (const nombre of coleccionesObjetivo) {
+        const coleccion = mongoose.connection.collections[nombre];
+
+        if (!coleccion) {
+            logger.warn(`❗ La colección '${nombre}' no existe. Se omite.`);
+            continue;
+        }
+
+        logger.info(`🧹 Eliminando colección '${nombre}'...`);
+
+        await coleccion.drop().catch((err) => {
+            if (err.code === 26) {
+                logger.warn(`(omitido) '${nombre}' no existía.`);
+            } else {
+                throw err;
+            }
+        });
+    }
+
+    logger.success("✔ Colecciones eliminadas correctamente.");
+}
+
+
+/**
+ * Carga y valida el archivo JSON del export.
+ */
+function cargarExportacion() {
+    if (!fs.existsSync(FILE_PATH)) {
+        throw new Error(`❌ No se encontró el archivo: ${FILE_PATH}`);
+    }
+
+    const contenido = fs.readFileSync(FILE_PATH, "utf8");
+    const json = JSON.parse(contenido);
+
+    if (!json.companies || !json.jobs) {
+        throw new Error(`❌ Formato inválido. Debe ser: { companies: [...], jobs: [...] }`);
+    }
+
+    logger.success(
+        `✔ Archivo cargado → Empresas: ${json.companies.length} | Trabajos: ${json.jobs.length}`
+    );
+
+    return json;
+}
+
+
+/**
+ * Inserta documentos en lotes (chunks) para mejor rendimiento.
+ */
+async function insertChunked(Model, data, progress, insertados) {
+    for (let i = 0; i < data.length; i += CHUNK_SIZE) {
+        const slice = data.slice(i, i + CHUNK_SIZE);
+        await Model.insertMany(slice);
+
+        insertados.count += slice.length;
+        progress.update(insertados.count);
     }
 }
 
-insertData();
+
+/**
+ * Inserta los datos completos en MongoDB.
+ */
+async function insertarDatos() {
+    await connectDB();
+    await limpiarColecciones();
+
+    const data = cargarExportacion();
+    const totalItems = data.companies.length + data.jobs.length;
+
+    logger.section("Insertando datos");
+    const progress = new ProgressBar(totalItems);
+
+    const insertados = { count: 0 };
+
+    // Empresas
+    if (data.companies.length > 0) {
+        await insertChunked(Company, data.companies, progress, insertados);
+    }
+
+    // Trabajos
+    if (data.jobs.length > 0) {
+        await insertChunked(Job, data.jobs, progress, insertados);
+    }
+
+    progress.finish();
+    logger.success("🎉 Importación completada exitosamente.");
+
+    process.exit(0);
+}
+
+
+// ---------------------------------------------------------
+insertarDatos().catch(err => {
+    logger.error(`❌ Error durante la importación: ${err.message}`);
+    process.exit(1);
+});

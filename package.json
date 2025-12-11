@@ -8,9 +8,11 @@
     "dev": "nodemon --watch . server.js",
     "deletedb": "node scripts/deleteDb.js",
     "insertdata": "node scripts/insertData.js",
+    "locations": "node scripts/importLocations.js",
     "createindexes": "node scripts/createIndexes.js",
     "startdb": "node scripts/startDb.js",
-    "setup": "node scripts/setupEverything.js"
+    "setup": "node scripts/setupEverything.js",
+    "logos": "node scripts/standardize_logos.js"
   },
   "keywords": [],
   "author": "",
