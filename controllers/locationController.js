@@ -1,26 +1,15 @@
 /**
  * ============================================================================
- *  locationController.js — CONTROLADOR DE UBICACIONES
+ *  locationController.js — CONTROLADOR DE UBICACIONES (ULTRA RÁPIDO)
  * ============================================================================
  *
- * Este archivo contiene toda la lógica para consultar ubicaciones desde el
- * modelo Location organizado como árbol:
+ * Este archivo contiene:
  *
- *   Location {
- *       country: "Mexico",
- *       states: [
- *          { state: "Coahuila", cities: ["Torreon", "Saltillo"] }
- *       ]
- *   }
+ *   ✔ Acceso con CACHE EN MEMORIA
+ *   ✔ Búsqueda global con MinHeap (TOP-K eficiente)
+ *   ✔ Normalización para búsquedas flexibles
+ *   ✔ Documentación completa para cada endpoint
  *
- * Endpoints implementados:
- *
- *   ✔ getCountries()        → Regresa lista de países
- *   ✔ getStatesByCountry()  → Regresa estados de un país
- *   ✔ getCitiesByState()    → Regresa ciudades de un estado
- *   ✔ searchLocations()     → Buscador global con ranking inteligente
- *
- * Ahora incluye CACHE EN MEMORIA para evitar consultas repetidas a Mongo.
  * ============================================================================
  */
 
@@ -30,63 +19,7 @@ import {
     getCountry
 } from "../utils/locationCache.js";
 
-/* =============================================================================
- *               GET /api/locations/countries
- * =============================================================================
- */
-export async function getCountries(req, res) {
-
-    await loadLocationCache(); // <── Cache automático
-
-    const docs = getAllLocations();
-    const countries = docs.map(d => d.country).sort();
-
-    return res.json(countries);
-}
-
-/* =============================================================================
- *               GET /api/locations/:country/states
- * =============================================================================
- */
-export async function getStatesByCountry(req, res) {
-    const { country } = req.params;
-
-    await loadLocationCache();
-
-    const doc = getCountry(country);
-
-    if (!doc) {
-        return res.status(404).json({ error: "País no encontrado" });
-    }
-
-    const states = doc.states.map(s => s.state).sort();
-
-    return res.json(states);
-}
-
-/* =============================================================================
- *               GET /api/locations/:country/:state/cities
- * =============================================================================
- */
-export async function getCitiesByState(req, res) {
-    const { country, state } = req.params;
-
-    await loadLocationCache();
-
-    const doc = getCountry(country);
-
-    if (!doc) {
-        return res.status(404).json({ error: "País no encontrado" });
-    }
-
-    const stateObj = doc.states.find(s => s.state === state);
-
-    if (!stateObj) {
-        return res.status(404).json({ error: "Estado no encontrado" });
-    }
-
-    return res.json(stateObj.cities.sort());
-}
+import { MinHeap } from "../utils/minHeap.js";
 
 /* ============================================================================ */
 /* NORMALIZADOR — convierte texto a formato uniforme */
@@ -105,44 +38,41 @@ function normalize(str = "") {
 /* ============================================================================ */
 function computeScore(text, query) {
     const t = normalize(text);
-    const q = normalize(query);
 
-    if (t === q) return 100;
-    if (t.startsWith(q)) return 80;
-    if (t.includes(q)) return 50;
+    if (t === query) return 100;
+    if (t.startsWith(query)) return 80;
+    if (t.includes(query)) return 50;
 
-    return 20 - Math.min(Math.abs(t.length - q.length), 10);
+    return 20 - Math.min(Math.abs(t.length - query.length), 10);
 }
 
 /* ============================================================================ */
-/* collectMatches — Extrae coincidencias en país / estado / ciudad */
+/* collectMatchesHeap — Búsqueda con MinHeap (TOP-K más rápido) */
 /* ============================================================================ */
-function collectMatches(docs, query) {
+function collectMatchesHeap(docs, query, k) {
     const qNorm = normalize(query);
-    const results = [];
+    const heap = new MinHeap(k);
 
     for (const doc of docs) {
         const countryNorm = normalize(doc.country);
 
-        // País
         if (countryNorm.includes(qNorm)) {
-            results.push({
+            heap.push({
                 type: "country",
                 country: doc.country,
-                score: computeScore(doc.country, query)
+                score: computeScore(doc.country, qNorm)
             });
         }
 
-        // Estados y ciudades
         for (const stateObj of doc.states) {
             const stateNorm = normalize(stateObj.state);
 
             if (stateNorm.includes(qNorm)) {
-                results.push({
+                heap.push({
                     type: "state",
                     country: doc.country,
                     state: stateObj.state,
-                    score: computeScore(stateObj.state, query)
+                    score: computeScore(stateObj.state, qNorm)
                 });
             }
 
@@ -150,23 +80,70 @@ function collectMatches(docs, query) {
                 const cityNorm = normalize(city);
 
                 if (cityNorm.includes(qNorm)) {
-                    results.push({
+                    heap.push({
                         type: "city",
                         country: doc.country,
                         state: stateObj.state,
                         city,
-                        score: computeScore(city, query)
+                        score: computeScore(city, qNorm)
                     });
                 }
             }
         }
     }
 
-    return results;
+    return heap.getSorted();
 }
 
 /* =============================================================================
- *          GET /api/locations/search?q=texto&k=20 — Buscador global
+ *  GET /api/locations/countries — Lista de países
+ * =============================================================================
+ */
+export async function getCountries(req, res) {
+    await loadLocationCache();
+
+    const docs = getAllLocations();
+    const countries = docs.map(d => d.country).sort();
+
+    return res.json(countries);
+}
+
+/* =============================================================================
+ *  GET /api/locations/:country/states — Lista de estados
+ * =============================================================================
+ */
+export async function getStatesByCountry(req, res) {
+    const { country } = req.params;
+
+    await loadLocationCache();
+
+    const doc = getCountry(country);
+
+    if (!doc) return res.status(404).json({ error: "País no encontrado" });
+
+    return res.json(doc.states.map(s => s.state).sort());
+}
+
+/* =============================================================================
+ *  GET /api/locations/:country/:state/cities — Lista de ciudades
+ * =============================================================================
+ */
+export async function getCitiesByState(req, res) {
+    const { country, state } = req.params;
+
+    await loadLocationCache();
+
+    const doc = getCountry(country);
+    if (!doc) return res.status(404).json({ error: "País no encontrado" });
+
+    const stateObj = doc.states.find(s => s.state === state);
+    if (!stateObj) return res.status(404).json({ error: "Estado no encontrado" });
+
+    return res.json(stateObj.cities.sort());
+}
+
+/* =============================================================================
+ *  GET /api/locations/search?q=texto&k=20 — Buscador global ultra rápido
  * =============================================================================
  */
 export async function searchLocations(req, res) {
@@ -179,15 +156,13 @@ export async function searchLocations(req, res) {
         if (!q.trim()) return res.json({ results: [] });
 
         await loadLocationCache();
-
         const docs = getAllLocations();
-        const matches = collectMatches(docs, q);
 
-        // Ordenar por score
-        matches.sort((a, b) => b.score - a.score);
+        // TOP-K eficiente usando MinHeap
+        const results = collectMatchesHeap(docs, q, k);
 
-        // Limpiar score antes de enviar
-        const cleaned = matches.slice(0, k).map(({ score, ...rest }) => rest);
+        // Limpia score antes de enviar
+        const cleaned = results.map(({ score, ...rest }) => rest);
 
         return res.json({ results: cleaned });
 
