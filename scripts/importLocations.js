@@ -2,24 +2,9 @@
  * importLocations.js — Importador TREE (país → estados → ciudades)
  *
  * Este script:
- *   ✔ Lee el archivo exportado: ./export/locations.json
+ *   ✔ Lee el archivo ./data/locations.json
  *   ✔ Borra SOLAMENTE la colección "locations"
  *   ✔ Inserta 1 documento por país con su árbol completo
- *
- * Formato esperado:
- *
- * {
- *   "locations": [
- *     {
- *       "country": "Mexico",
- *       "states": [
- *         { "state": "Coahuila", "cities": ["Torreón"] },
- *         { "state": "Jalisco",  "cities": ["Guadalajara"] }
- *       ]
- *     },
- *     ...
- *   ]
- * }
  */
 
 import fs from "fs";
@@ -34,11 +19,11 @@ import { createPromptFromArgs } from "../utils/prompt.js";
 const prompt = createPromptFromArgs(process.argv);
 const DATA_PATH = path.resolve("./data/locations.json");
 
-// ------------------------------------------------------------
-// 1) Cargar archivo JSON
-// ------------------------------------------------------------
+/* ---------------------------------------------------------------------------
+ * 1) Cargar archivo JSON
+ * --------------------------------------------------------------------------- */
 function loadTree() {
-    logger.section("Cargando locations.json…");
+    logger.section("Cargando archivo de ubicaciones");
 
     if (!fs.existsSync(DATA_PATH)) {
         logger.error(`No existe el archivo: ${DATA_PATH}`);
@@ -54,7 +39,7 @@ function loadTree() {
             process.exit(1);
         }
 
-        logger.success(`Países cargados: ${json.locations.length}`);
+        logger.success(`Archivo válido. Países cargados: ${json.locations.length}`);
         return json.locations;
 
     } catch (err) {
@@ -64,15 +49,15 @@ function loadTree() {
     }
 }
 
-// ------------------------------------------------------------
-// 2) Borrar únicamente la colección locations
-// ------------------------------------------------------------
+/* ---------------------------------------------------------------------------
+ * 2) Eliminar colección 'locations'
+ * --------------------------------------------------------------------------- */
 async function clearCollection() {
-    logger.section("Eliminando colección 'locations'…");
+    logger.section("Eliminando colección 'locations'");
 
     try {
         await Location.collection.drop();
-        logger.success("Colección 'locations' eliminada.");
+        logger.success("Colección 'locations' eliminada correctamente.");
     } catch (err) {
         if (err.code === 26) {
             logger.warn("La colección no existía. Se creará nueva.");
@@ -82,20 +67,20 @@ async function clearCollection() {
     }
 }
 
-// ------------------------------------------------------------
-// 3) Insertar el árbol tal cual
-// ------------------------------------------------------------
+/* ---------------------------------------------------------------------------
+ * 3) Insertar el árbol completo
+ * --------------------------------------------------------------------------- */
 async function insertTree(tree) {
-    logger.section("Insertando países…");
+    logger.section("Insertando países y sus estados/ciudades");
 
     await Location.insertMany(tree);
 
-    logger.success("Importación completada.");
+    logger.success("Datos de ubicaciones insertados correctamente.");
 }
 
-// ------------------------------------------------------------
-// MAIN
-// ------------------------------------------------------------
+/* ---------------------------------------------------------------------------
+ * MAIN
+ * --------------------------------------------------------------------------- */
 async function main() {
     logger.section("IMPORTADOR DE LOCATIONS");
 
@@ -107,7 +92,7 @@ async function main() {
     );
 
     if (!ok) {
-        logger.warn("Cancelado por el usuario.");
+        logger.warn("Operación cancelada por el usuario.");
         process.exit(0);
     }
 
@@ -115,7 +100,7 @@ async function main() {
     await insertTree(tree);
 
     logger.section("FINALIZADO");
-    logger.success("La colección 'locations' fue recreada con estructura.");
+    logger.success("La colección 'locations' fue recreada exitosamente.");
     process.exit(0);
 }
 

@@ -68,10 +68,10 @@ backend/
 │   └── EmployeeCount.js                  # Tamaño de empresa por periodo
 │
 ├── controllers/
-│   └── job.controller.js                 # Lógica de /api/jobs
+│   └── jobController.js                 # Lógica de /api/jobs
 │
 ├── routes/
-│   └── job.routes.js                     # Rutas para recursos Job
+│   └── jobRoutes.js                     # Rutas para recursos Job
 │
 ├── middleware/
 │   └── (futuros middlewares: auth, errores, etc.)
@@ -204,13 +204,13 @@ Por ahora la API expone un endpoint básico de lectura de empleos, pensado como 
 
 Definido en:
 
-* Ruta: `routes/job.routes.js`
-* Controlador: `controllers/job.controller.js`
+* Ruta: `routes/jobRoutes.js`
+* Controlador: `controllers/jobController.js`
 
 Ejemplo de implementación del controlador:
 
 ```js
-// controllers/job.controller.js
+// controllers/jobController.js
 import Job from "../models/Job.js";
 
 export async function getJobs(req, res) {
@@ -226,8 +226,8 @@ Ejemplo de uso de la ruta en el servidor:
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { connectDB } from "./connection/db.js";
-import jobRoutes from "./routes/job.routes.js";
+import {connectDB} from "./connection/db.js";
+import jobRoutes from "./jobRoutes.js";
 
 dotenv.config();
 
@@ -242,7 +242,7 @@ connectDB();
 app.use("/api/jobs", jobRoutes);
 
 app.get("/", (req, res) => {
-    res.json({ message: "Backend running" });
+    res.json({message: "Backend running"});
 });
 
 app.listen(PORT, () => {
