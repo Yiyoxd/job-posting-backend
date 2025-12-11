@@ -2,23 +2,6 @@
  * ============================================================================
  *  Company.js — MODELO DE EMPRESA
  * ============================================================================
- *
- * Representa una empresa que publica ofertas de trabajo.
- *
- * Campos principales:
- *   - name, description
- *   - tamaño (company_size_min, company_size_max)
- *   - ubicación: country, state, city, address
- *   - url oficial de la empresa
- *
- * Índices:
- *   - name (para buscador global)
- *   - country (filtros geográficos)
- *
- * Este modelo se usa en:
- *   ✔ jobController.js (JOIN por company_id)
- *   ✔ importadores (primer se insertan empresas)
- * ============================================================================
  */
 
 import mongoose from "mongoose";
@@ -28,7 +11,7 @@ const companySchema = new mongoose.Schema({
         type: String,
         required: true,
         trim: true,
-        index: true // buscador rápido
+        index: true
     },
 
     description: String,
@@ -52,6 +35,43 @@ const companySchema = new mongoose.Schema({
 
 }, {
     timestamps: true
+});
+
+/* =============================================================================
+ *  Limpieza automática del JSON enviado al frontend
+ * =============================================================================
+ *
+ * - NO exponemos el _id ni un campo id.
+ * - Eliminamos:
+ *     _id
+ *     __v
+ *     createdAt
+ *     updatedAt
+ * =============================================================================
+ */
+companySchema.set("toJSON", {
+    versionKey: false,
+    virtuals: false,
+    transform: (doc, ret) => {
+        // No exponemos el id interno
+        delete ret._id;
+        delete ret.__v;
+        delete ret.createdAt;
+        delete ret.updatedAt;
+        return ret;
+    }
+});
+
+companySchema.set("toObject", {
+    versionKey: false,
+    virtuals: false,
+    transform: (doc, ret) => {
+        delete ret._id;
+        delete ret.__v;
+        delete ret.createdAt;
+        delete ret.updatedAt;
+        return ret;
+    }
 });
 
 export default mongoose.model("Company", companySchema);

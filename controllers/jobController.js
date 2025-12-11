@@ -171,6 +171,38 @@ function buildPaginationParams(queryParams = {}) {
     return { page, limit, skip };
 }
 
+/**
+ * Renombra company_id → company SOLO para la respuesta JSON,
+ * sin cambiar el schema ni las consultas.
+ */
+function mapJobCompanyField(job) {
+    if (!job || typeof job !== "object") return job;
+
+    // Si es un documento de Mongoose, lo convertimos a objeto plano
+    const plain = typeof job.toObject === "function" ? job.toObject() : job;
+
+    if (plain.company_id !== undefined) {
+        plain.company = plain.company_id;
+        delete plain.company_id;
+    }
+
+    return plain;
+}
+
+/**
+ * Aplica el renombrado company_id → company a un resultado { meta, data }.
+ */
+function mapJobsResponse(result) {
+    if (!result || typeof result !== "object") return result;
+
+    const mapped = { ...result };
+    if (Array.isArray(result.data)) {
+        mapped.data = result.data.map(mapJobCompanyField);
+    }
+
+    return mapped;
+}
+
 /* =============================================================================
  *  Filtros base (todos menos q / ranking)
  * =============================================================================
@@ -513,6 +545,21 @@ async function listJobsRankedByQuery(queryParams = {}, {
 
     const totalPages = Math.ceil(total / limit) || 1;
 
+    // Limpieza de campos internos de ranking antes de responder
+    for (const job of jobs) {
+        delete job.textScore;
+        delete job.titleLower;
+        delete job.descLower;
+        delete job.listedTimeMs;
+        delete job.titleTermScore;
+        delete job.descTermScore;
+        delete job.allTermsInTitle;
+        delete job.phraseInTitle;
+        delete job.phraseInDesc;
+        delete job.recencyBoost;
+        delete job.finalScore;
+    }
+
     return {
         meta: {
             page,
@@ -520,7 +567,17 @@ async function listJobsRankedByQuery(queryParams = {}, {
             total,
             totalPages
         },
-        data: jobs
+        data: jobs.map(j => {
+            // Convertir a documento Mongoose para aplicar toJSON()
+            const doc = new Job(j);
+            const clean = doc.toJSON();
+
+            // renombrar al final
+            clean.company = clean.company_id;
+            delete clean.company_id;
+
+            return clean;
+        })
     };
 }
 
@@ -599,7 +656,8 @@ export async function getJobs(req, res) {
             includeCompanyFromQuery: true
         });
 
-        res.json(result);
+        const mapped = mapJobsResponse(result);
+        res.json(mapped);
 
     } catch (err) {
         res.status(500).json({
@@ -622,7 +680,8 @@ export async function getJobById(req, res) {
             return res.status(404).json({ error: "Empleo no encontrado" });
         }
 
-        res.json(job);
+        const mapped = mapJobCompanyField(job);
+        res.json(mapped);
 
     } catch (err) {
         res.status(500).json({
@@ -647,7 +706,8 @@ export async function getJobsByCompany(req, res) {
             includeCompanyFromQuery: false // El ID "oficial" es el del path
         });
 
-        res.json(result);
+        const mapped = mapJobsResponse(result);
+        res.json(mapped);
 
     } catch (err) {
         res.status(500).json({
@@ -715,7 +775,8 @@ export async function getJobFilterOptions(req, res) {
 export async function createJob(req, res) {
     try {
         const job = await Job.create(req.body);
-        res.status(201).json(job);
+        const mapped = mapJobCompanyField(job);
+        res.status(201).json(mapped);
 
     } catch (err) {
         res.status(500).json({
@@ -741,7 +802,8 @@ export async function updateJob(req, res) {
             return res.status(404).json({ error: "Empleo no encontrado" });
         }
 
-        res.json(updated);
+        const mapped = mapJobCompanyField(updated);
+        res.json(mapped);
 
     } catch (err) {
         res.status(500).json({

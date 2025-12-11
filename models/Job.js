@@ -4,26 +4,6 @@
  * ============================================================================
  *
  * Representa una oferta de trabajo publicada por una empresa.
- *
- * Un Job SIEMPRE pertenece a una Company (company_id).
- *
- * Campos principales:
- *   - title, description
- *   - salario: min, max, currency, normalized
- *   - ubicación: country, state, city
- *   - metadata: work_type, work_location_type, listed_time
- *
- * Índices:
- *   - job_id (búsqueda directa)
- *   - listed_time (orden cronológico)
- *   - country (filtros por región)
- *   - company_id (JOIN lógico)
- *   - work_location_type (filtrado rápido remoto/híbrido/presencial)
- *
- * Este modelo se utiliza en:
- *   ✔ jobController.js
- *   ✔ insertData.js (importador masivo)
- *   ✔ filtros por ubicación y modalidad
  * ============================================================================
  */
 
@@ -65,7 +45,7 @@ const jobSchema = new mongoose.Schema({
     // Tipo de trabajo (FULL_TIME, PART_TIME, CONTRACT...)
     work_type: String,
 
-    // NUEVO: modalidad del trabajo (REMOTE / ONSITE / HYBRID)
+    // Modalidad del trabajo (REMOTE / ONSITE / HYBRID)
     work_location_type: {
         type: String,
         enum: ["ONSITE", "HYBRID", "REMOTE"],
@@ -93,6 +73,63 @@ const jobSchema = new mongoose.Schema({
 
 }, {
     timestamps: true // createdAt + updatedAt
+});
+
+/* =============================================================================
+ *  Limpieza automática del JSON enviado al frontend
+ * =============================================================================
+ *
+ * - NO exponemos _id ni id (interno de Mongo).
+ * - Eliminamos:
+ *     _id
+ *     __v
+ *     createdAt
+ *     updatedAt
+ * - Si company_id viene populado, también se limpia igual.
+ * =============================================================================
+ */
+jobSchema.set("toJSON", {
+    versionKey: false,
+    virtuals: false,
+    transform: (doc, ret) => {
+        // No exponemos el id interno del Job
+        delete ret._id;
+        delete ret.__v;
+        delete ret.createdAt;
+        delete ret.updatedAt;
+
+        // Si viene company_id populado, también lo limpiamos
+        if (ret.company_id && typeof ret.company_id === "object") {
+            delete ret.company_id._id;
+            delete ret.company_id.__v;
+            delete ret.company_id.createdAt;
+            delete ret.company_id.updatedAt;
+            delete ret.company_id.id; // por si lo hubiera puesto otro transform
+        }
+
+        return ret;
+    }
+});
+
+jobSchema.set("toObject", {
+    versionKey: false,
+    virtuals: false,
+    transform: (doc, ret) => {
+        delete ret._id;
+        delete ret.__v;
+        delete ret.createdAt;
+        delete ret.updatedAt;
+
+        if (ret.company_id && typeof ret.company_id === "object") {
+            delete ret.company_id._id;
+            delete ret.company_id.__v;
+            delete ret.company_id.createdAt;
+            delete ret.company_id.updatedAt;
+            delete ret.company_id.id;
+        }
+
+        return ret;
+    }
 });
 
 export default mongoose.model("Job", jobSchema);
