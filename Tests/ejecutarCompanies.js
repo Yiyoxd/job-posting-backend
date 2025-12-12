@@ -84,8 +84,8 @@ const tests = [
     { name: "canada_only", url: `${API_BASE}?country=Canada` },
     { name: "uk_only", url: `${API_BASE}?country=United%20Kingdom` },
     { name: "usa_california", url: `${API_BASE}?country=United%20States&state=California` },
-    { name: "mexico_coahuila", url: `${API_BASE}?country=Mexico&state=Coahuila` },
-    { name: "mexico_coahuila_torreon", url: `${API_BASE}?country=Mexico&state=Coahuila&city=Torreon` },
+    { name: "mexico_coahuila", url: `${API_BASE}?country=Mexico&state=Coahuila de Zaragoza` },
+    { name: "mexico_coahuila_torreon", url: `${API_BASE}?country=Mexico&state=Coahuila de Zaragoza&city=Torreon` },
 
     // -------------------------
     // FILTRO + BÚSQUEDA (combinados)
