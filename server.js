@@ -57,7 +57,7 @@ app.get("/company_logos/processed/:file", (req, res) => {
     }
 
     const processedPath = path.join(LOGOS_PROCESSED_DIR, file);
-    const fallbackPath = path.join(LOGOS_ORIGINAL_DIR, DEFAULT_LOGO_FILE);
+    const fallbackPath = path.join(LOGOS_PROCESSED_DIR, DEFAULT_LOGO_FILE);
 
     if (fs.existsSync(processedPath)) {
         return res.sendFile(processedPath);

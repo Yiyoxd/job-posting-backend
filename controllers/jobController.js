@@ -46,15 +46,9 @@ import {
     getJobFilterOptionsService,
     createJobService,
     updateJobService,
-    deleteJobService,
-    buildLogoFullPath
+    deleteJobService
 } from "../services/jobService.js";
 
-/**
- * Re-export de buildLogoFullPath para mantener compatibilidad si
- * en algún lugar del código se importaba desde el controller.
- */
-export { buildLogoFullPath };
 
 /* =============================================================================
  *  GET /api/jobs — Listado de empleos con filtros, paginación y ranking

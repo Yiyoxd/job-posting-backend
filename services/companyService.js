@@ -1,179 +1,91 @@
+// services/companyService.js
+
 /**
  * ============================================================================
- *  companyService.js — LÓGICA DE NEGOCIO DE EMPRESAS (RANKER PRO + LOGO FULLPATH)
+ * companyService.js — Capa de servicio (lógica de negocio) para Empresas (Company)
  * ============================================================================
  *
- * Este archivo NO usa Express ni req/res.
- * Solo expone funciones de servicio que:
- *   - Consultan la colección Company (y Job para /:id/jobs)
- *   - Aplican filtros, paginación y ordenamiento
- *   - Implementan un RANKER AVANZADO cuando hay q y NO hay sortBy
- *   - Adjuntan siempre logo_full_path basado en company_id
+ * Este módulo implementa lógica de negocio para empresas sin depender de Express
+ * (no usa req/res). Expone funciones que reciben entradas “puras” (queryParams,
+ * ids, payloads) y operan sobre modelos Mongoose (Company, Job).
  *
- * Funciones expuestas (usadas por companyController):
- *
- *   ✔ listCompaniesService(queryParams)
- *        → Listado de empresas con filtros + paginación + rank inteligente.
- *
- *   ✔ getCompanyByIdService(id)
- *        → Una empresa (o null si no existe).
- *
- *   ✔ getCompanyJobsService(companyId, queryParams)
- *        → Empleos de una empresa con filtros + paginación (listados simples).
- *
- *   ✔ getCompanyFilterOptionsService()
- *        → Distincts para filtros: países, estados, ciudades.
- *
- *   ✔ createCompanyService(payload)
- *        ✔ updateCompanyService(id, payload)
- *        ✔ deleteCompanyService(id)
- *
- * Todas las respuestas que incluyen empresas llevan:
- *   - TODOS los campos tal como están en MongoDB
- *   - UN campo extra:
- *       logo_full_path: string | null
- *         → URL COMPLETA del logo basado en company_id
- *            p.ej. "http://localhost:8000/company_logos/processed/268.png"
+ * Contrato de salida:
+ * - En listados y lecturas, se devuelve { meta, data } o un objeto Company.
+ * - Cuando se retorna una empresa, se incluye el campo adicional:
+ *     logo_full_path: string | null
+ *   calculado a partir de company_id con la convención pública del backend.
  * ============================================================================
  */
 
 import Company from "../models/Company.js";
 import Job from "../models/Job.js";
+
 import fs from "fs";
 import path from "path";
 import sharp from "sharp";
 
 import { standardizeLogo, DEFAULT_LOGO_SIZE } from "../utils/imageProcessor.js";
 
+import { buildPaginationParams } from "../utils/paginationUtils.js";
+import { parseNumber, normalizeSearchTerm as normalizeSearchTermBasic } from "../utils/parsingUtils.js";
+import { buildLogoFullPath } from "../utils/assets/logoUtils.js";
 
-/* ============================================================================
- *  LOGO FULLPATH (MISMA LÓGICA QUE EN JOBS: TODO POR CONSTANTES)
- * ============================================================================
- */
-
-const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:8000";
-
-// Quitar sufijo /api si viene así (para que las imágenes salgan en el host raíz)
-const ASSET_BASE_URL = API_BASE_URL.replace(/\/api\/?$/, "");
-
-// Prefijo público donde Express sirve los logos
-//   /company_logos  → expone data/company_logos
-const LOGO_PUBLIC_PREFIX = "/company_logos";
-
-// Subcarpeta real donde quedaron los logos procesados
-const LOGO_PROCESSED_DIR = "processed";
-
-// Path relativo que el navegador debe pedir:
-//   /company_logos/processed/<company_id>.png
-const LOGO_RELATIVE_DIR = `${LOGO_PUBLIC_PREFIX}/${LOGO_PROCESSED_DIR}`;
-
-/**
- * buildLogoFullPath
- * -----------------
- * Devuelve la URL COMPLETA del logo a partir de company_id.
- *
- *   company_id = 268 →
- *   "http://localhost:8000/company_logos/processed/268.png"
- *
- * Si companyId es null/undefined o string vacía, regresa null.
- */
-export function buildLogoFullPath(companyId) {
-    if (companyId === undefined || companyId === null) return null;
-
-    const idStr = String(companyId).trim();
-    if (!idStr) return null;
-
-    return `${ASSET_BASE_URL}${LOGO_RELATIVE_DIR}/${idStr}.png`;
-}
-
-/* ============================================================================
- *  HELPERS GENÉRICOS (NUMÉRICOS, PAGINACIÓN, NORMALIZACIÓN)
- * ============================================================================
+/* =============================================================================
+ * Helpers internos de Company (ranker y normalización con acentos)
+ * =============================================================================
  */
 
 /**
- * parseNumber
- * -----------
- * Parsea un número desde query string. Devuelve null si no es válido.
+ * Normaliza un string para comparaciones “humanas”:
+ * - minúsculas
+ * - normaliza unicode (NFD)
+ * - elimina diacríticos
+ * - reemplaza símbolos por espacios
+ * - colapsa espacios
+ * - trim
+ * @param {string} str
+ * @returns {string}
  */
-function parseNumber(value) {
-    if (value === undefined || value === null || value === "") return null;
-    const n = Number(value);
-    return Number.isNaN(n) ? null : n;
-}
-
-/**
- * buildPaginationParams
- * ---------------------
- * Crea page, limit y skip a partir de queryParams.
- *
- *   - page  es 1-based (min: 1)
- *   - limit es >= 1 (default 20)
- */
-function buildPaginationParams(queryParams = {}) {
-    const page = Math.max(parseInt(queryParams.page || "1", 10), 1);
-    const limit = Math.max(parseInt(queryParams.limit || "20", 10), 1);
-    const skip = (page - 1) * limit;
-
-    return { page, limit, skip };
-}
-
-/**
- * normalize
- * ---------
- * Normaliza una cadena para comparar/buscar:
- *   - Convierte a string
- *   - Minúsculas
- *   - Normaliza Unicode (NFD)
- *   - Quita acentos
- *   - Reemplaza símbolos por espacios
- *   - Colapsa espacios
- *   - trim
- */
-function normalize(str = "") {
+function normalizeHuman(str = "") {
     return String(str)
         .toLowerCase()
         .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "") // quitar acentos
-        .replace(/[^a-z0-9\s]/g, " ")    // símbolos → espacio
-        .replace(/\s+/g, " ")            // colapsar espacios
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
         .trim();
 }
 
 /**
- * normalizeSearchTerm
- * -------------------
- * Versión especial para q:
- *   - trim inicial
- *   - colapsa espacios
- *   - luego pasa por normalize()
- *
- * Si queda vacío, devuelve null.
+ * Normaliza la búsqueda `q` para ranker de empresas:
+ * - trim + colapsa espacios
+ * - aplica normalizeHuman
+ * Si queda vacío, retorna null.
+ * @param {any} qRaw
+ * @returns {string|null}
  */
-function normalizeSearchTerm(qRaw) {
-    if (qRaw === undefined || qRaw === null) return null;
-    const s = String(qRaw).trim().replace(/\s+/g, " ");
-    const n = normalize(s);
+function normalizeCompanySearchTerm(qRaw) {
+    const basic = normalizeSearchTermBasic(qRaw); // trim + colapsa + lower
+    if (!basic) return null;
+    const n = normalizeHuman(basic);
     return n || null;
 }
 
 /**
- * tokenize
- * --------
- * Convierte un string en tokens únicos (palabras) normalizados.
+ * Tokeniza un string normalizado en tokens únicos.
+ * @param {string} str
+ * @returns {string[]}
  */
 function tokenize(str = "") {
-    const n = normalize(str);
+    const n = normalizeHuman(str);
     if (!n) return [];
-    const parts = n.split(" ").filter(Boolean);
-    return [...new Set(parts)];
+    return [...new Set(n.split(" ").filter(Boolean))];
 }
 
 /**
- * toPlainCompany
- * --------------
- * Acepta un documento de Mongoose o un objeto plano y devuelve
- * siempre un objeto plano normal.
+ * Convierte doc/obj a plain object.
+ * @param {any} doc
+ * @returns {Object|null}
  */
 function toPlainCompany(doc) {
     if (!doc) return null;
@@ -183,16 +95,13 @@ function toPlainCompany(doc) {
 }
 
 /**
- * attachLogoFullPath
- * ------------------
- * Recibe una empresa (doc o plain object) y retorna un objeto
- * con TODOS los campos originales + logo_full_path calculado.
- *
- * NO elimina _id ni ningún otro campo.
+ * Adjunta logo_full_path preservando todos los campos originales.
+ * @param {any} companyDocOrPlain
+ * @returns {Object|null}
  */
 function attachLogoFullPath(companyDocOrPlain) {
     const plain = toPlainCompany(companyDocOrPlain);
-    if (!plain) return plain;
+    if (!plain) return null;
 
     return {
         ...plain,
@@ -200,64 +109,43 @@ function attachLogoFullPath(companyDocOrPlain) {
     };
 }
 
-/* ============================================================================
- *  FILTROS Y ORDENAMIENTO BASE PARA COMPANIES
- * ============================================================================
+/* =============================================================================
+ * Filtros y ordenamiento base para Company
+ * =============================================================================
  */
 
 /**
- * buildCompanyFilters
- * -------------------
- * Construye filtros para la entidad Company a partir de queryParams.
- *
- * Filtros soportados:
- *   - q          → Búsqueda por nombre / descripción (solo si includeTextFilter = true)
- *   - country    → País
- *   - state      → Estado
- *   - city       → Ciudad
- *   - min_size   → Tamaño mínimo (company_size_max >= min_size)
- *   - max_size   → Tamaño máximo (company_size_min <= max_size)
+ * Construye filtros para Company.
+ * Soporta:
+ * - q (regex simple) si includeTextFilter = true
+ * - country, state, city
+ * - min_size (company_size_max >= min_size)
+ * - max_size (company_size_min <= max_size)
  *
  * @param {Object} queryParams
- * @param {Object} options
- *   - includeTextFilter: boolean (default true)
- *       * true  → aplica filtro $or con regex sobre name / description
- *       * false → ignora q (el ranker se encarga de la relevancia)
+ * @param {{ includeTextFilter?: boolean }} options
+ * @returns {Object}
  */
-function buildCompanyFilters(
-    queryParams = {},
-    { includeTextFilter = true } = {}
-) {
-    const {
-        q,
-        country,
-        state,
-        city,
-        min_size,
-        max_size
-    } = queryParams;
+function buildCompanyFilters(queryParams = {}, { includeTextFilter = true } = {}) {
+    const { q, country, state, city, min_size, max_size } = queryParams;
 
     const filter = {};
 
-    // Búsqueda por texto (nombre / descripción) — SOLO si queremos filtro simple
-    if (includeTextFilter && q && q.trim()) {
-        const regex = new RegExp(q.trim(), "i");
-        filter.$or = [
-            { name: regex },
-            { description: regex }
-        ];
+    if (includeTextFilter) {
+        const raw = q !== undefined && q !== null ? String(q).trim() : "";
+        if (raw) {
+            const regex = new RegExp(raw, "i");
+            filter.$or = [{ name: regex }, { description: regex }];
+        }
     }
 
-    // Filtros por ubicación
     if (country) filter.country = country;
-    if (state)   filter.state = state;
-    if (city)    filter.city = city;
+    if (state) filter.state = state;
+    if (city) filter.city = city;
 
-    // Filtros por tamaño de empresa
     const minSize = parseNumber(min_size);
     const maxSize = parseNumber(max_size);
 
-    // company_size_max >= min_size
     if (minSize !== null) {
         filter.company_size_max = {
             ...(filter.company_size_max || {}),
@@ -265,7 +153,6 @@ function buildCompanyFilters(
         };
     }
 
-    // company_size_min <= max_size
     if (maxSize !== null) {
         filter.company_size_min = {
             ...(filter.company_size_min || {}),
@@ -277,14 +164,12 @@ function buildCompanyFilters(
 }
 
 /**
- * buildCompanySort
- * ----------------
- * Construye objeto sort para Company.
+ * Ordenamiento permitido para Company.
+ * sortBy: name | createdAt | country
+ * sortDir: asc | desc
  *
- * Campos permitidos:
- *   - name
- *   - createdAt
- *   - country
+ * @param {Object} queryParams
+ * @returns {Object}
  */
 function buildCompanySort(queryParams = {}) {
     const { sortBy, sortDir } = queryParams;
@@ -296,49 +181,17 @@ function buildCompanySort(queryParams = {}) {
     return { [field]: direction };
 }
 
-/* ============================================================================
- *  RANKER SÚPER INTELIGENTE PARA EMPRESAS (CUANDO HAY q Y NO HAY sortBy)
- * ============================================================================
- *
- * La idea es similar a finalScore del JobController, pero adaptado a Company:
- *
- *   Campos considerados:
- *     - name         (nombre de la empresa)
- *     - description  (descripción de la empresa)
- *     - ubicación    (country + state + city)
- *
- *   Señales de ranking:
- *     1. Coincidencias directas de la frase q:
- *          - Exacto en name
- *          - Prefijo de name
- *          - Substring en name
- *          - Exacto/prefijo/substring en la ubicación completa
- *          - Substring en description
- *
- *     2. Tokens:
- *          - Cuántos tokens de q aparecen en name / description / ubicación
- *          - Coverage (qué porcentaje de tokens cubre cada uno)
- *          - Si TODOS los tokens de q están cubiertos (full coverage)
- *          - Tokens en el mismo orden en el nombre
- *
- *     3. Longitud:
- *          - Se premia que name y q tengan longitudes similares
- *
- *     4. Bonus extra:
- *          - Si el conjunto de tokens de q coincide casi exactamente con el
- *            conjunto de tokens del nombre de la empresa.
+/* =============================================================================
+ * Ranker avanzado (cuando hay q y no hay sortBy)
+ * =============================================================================
  */
 
 /**
- * computeCompanyScore
- * -------------------
- * Calcula un score de relevancia para una empresa.
- *
- * @param {Object} company - plain object de Company.
- * @param {string} qNorm   - query normalizada (normalizeSearchTerm).
- * @param {string[]} qTokens - tokens de la query.
- *
- * @returns {number} score > 0 si es relevante, 0 si no.
+ * Calcula un score de relevancia para una empresa dada una query normalizada.
+ * @param {Object} company
+ * @param {string} qNorm
+ * @param {string[]} qTokens
+ * @returns {number}
  */
 function computeCompanyScore(company, qNorm, qTokens) {
     if (!qNorm) return 0;
@@ -351,136 +204,94 @@ function computeCompanyScore(company, qNorm, qTokens) {
 
     const locationStr = `${country} ${state} ${city}`.trim();
 
-    const nameNorm = normalize(name);
-    const descNorm = normalize(description);
-    const locNorm = normalize(locationStr);
+    const nameNorm = normalizeHuman(name);
+    const descNorm = normalizeHuman(description);
+    const locNorm = normalizeHuman(locationStr);
 
     const tokensName = tokenize(name);
     const tokensDesc = tokenize(description);
-    const tokensLoc  = tokenize(locationStr);
-    const tokensAll  = [...new Set([...tokensName, ...tokensDesc, ...tokensLoc])];
+    const tokensLoc = tokenize(locationStr);
+    const tokensAll = [...new Set([...tokensName, ...tokensDesc, ...tokensLoc])];
 
-    // Chequeo rápido: si no hay ningún match básico, descartamos
-    const hasTokenOverlap =
-        qTokens.some(t => tokensAll.includes(t));
-
+    const hasTokenOverlap = qTokens.some((t) => tokensAll.includes(t));
     const hasSubstring =
         (nameNorm && nameNorm.includes(qNorm)) ||
         (descNorm && descNorm.includes(qNorm)) ||
-        (locNorm && locNorm.includes(qNorm)) ||
-        (qNorm && tokensAll.some(t => qNorm.includes(t)));
+        (locNorm && locNorm.includes(qNorm));
 
-    if (!hasTokenOverlap && !hasSubstring) {
-        return 0;
-    }
+    if (!hasTokenOverlap && !hasSubstring) return 0;
 
-    /* ---------------------------------------------------------------
-     * 1. COINCIDENCIAS DIRECTAS (NOMBRE / UBICACIÓN / DESCRIPCIÓN)
-     * ------------------------------------------------------------ */
-    const exactName = (qNorm === nameNorm) ? 400 : 0;
+    // 1) Coincidencias directas
+    const exactName = qNorm === nameNorm ? 400 : 0;
     const prefixName = !exactName && nameNorm.startsWith(qNorm) ? 260 : 0;
-    const containsName =
-        !exactName && !prefixName && nameNorm.includes(qNorm) ? 180 : 0;
+    const containsName = !exactName && !prefixName && nameNorm.includes(qNorm) ? 180 : 0;
 
     const exactLoc = locNorm && qNorm === locNorm ? 220 : 0;
     const prefixLoc = locNorm && !exactLoc && locNorm.startsWith(qNorm) ? 170 : 0;
-    const containsLoc =
-        locNorm && !exactLoc && !prefixLoc && locNorm.includes(qNorm) ? 140 : 0;
+    const containsLoc = locNorm && !exactLoc && !prefixLoc && locNorm.includes(qNorm) ? 140 : 0;
 
     const containsDesc = descNorm && descNorm.includes(qNorm) ? 90 : 0;
 
-    /* ---------------------------------------------------------------
-     * 2. TOKENS: COVERAGE Y DISTRIBUCIÓN
-     * ------------------------------------------------------------ */
+    // 2) Tokens: coverage
     const uniqueQTokens = [...new Set(qTokens)];
     const totalTokens = uniqueQTokens.length || 1;
 
     let matchName = 0;
     let matchDesc = 0;
-    let matchLoc  = 0;
-    let matchAll  = 0;
+    let matchLoc = 0;
+    let matchAll = 0;
 
     for (const t of uniqueQTokens) {
         if (tokensName.includes(t)) matchName++;
         if (tokensDesc.includes(t)) matchDesc++;
-        if (tokensLoc.includes(t))  matchLoc++;
-        if (tokensAll.includes(t))  matchAll++;
+        if (tokensLoc.includes(t)) matchLoc++;
+        if (tokensAll.includes(t)) matchAll++;
     }
 
     const rName = matchName / totalTokens;
     const rDesc = matchDesc / totalTokens;
-    const rLoc  = matchLoc  / totalTokens;
-    const rAll  = matchAll  / totalTokens;
+    const rLoc = matchLoc / totalTokens;
+    const rAll = matchAll / totalTokens;
 
     let coverageScore = 0;
 
-    // Coverage en nombre (muy importante)
-    if (rName === 1) {
-        coverageScore += 200;
-    } else if (rName > 0) {
-        coverageScore += Math.round(rName * 140);
-    }
+    if (rName === 1) coverageScore += 200;
+    else if (rName > 0) coverageScore += Math.round(rName * 140);
 
-    // Coverage en descripción (apoya, pero menos que el nombre)
     coverageScore += Math.round(rDesc * 60);
-
-    // Coverage en ubicación (muy relevante cuando query incluye país/ciudad)
     coverageScore += Math.round(rLoc * 160);
 
-    // Coverage global
-    if (rAll === 1) {
-        coverageScore += 150;
-    } else if (rAll > 0) {
-        coverageScore += Math.round(rAll * 120);
-    }
+    if (rAll === 1) coverageScore += 150;
+    else if (rAll > 0) coverageScore += Math.round(rAll * 120);
 
-    // Per-token (para distinguir cuando hay muchos tokens coincidiendo)
-    const perTokenScore =
-        matchName * 35 +
-        matchLoc  * 30 +
-        matchDesc * 15;
+    const perTokenScore = matchName * 35 + matchLoc * 30 + matchDesc * 15;
 
-    /* ---------------------------------------------------------------
-     * 3. ORDEN DE TOKENS EN EL NOMBRE
-     * ------------------------------------------------------------ */
+    // 3) Orden de tokens en nombre
     let inOrderScore = 0;
     if (tokensName.length && uniqueQTokens.length >= 2) {
-        // Intentamos encontrar los tokens de q en orden dentro de tokensName
         let i = 0;
         let j = 0;
         while (i < tokensName.length && j < uniqueQTokens.length) {
-            if (tokensName[i] === uniqueQTokens[j]) {
-                j++;
-            }
+            if (tokensName[i] === uniqueQTokens[j]) j++;
             i++;
         }
         const inOrderRatio = j / uniqueQTokens.length;
-        if (inOrderRatio === 1) {
-            inOrderScore = 100;
-        } else if (inOrderRatio >= 0.5) {
-            inOrderScore = 50;
-        }
+        if (inOrderRatio === 1) inOrderScore = 100;
+        else if (inOrderRatio >= 0.5) inOrderScore = 50;
     }
 
-    /* ---------------------------------------------------------------
-     * 4. LONGITUD: SIMILITUD ENTRE q Y name
-     * ------------------------------------------------------------ */
+    // 4) Similitud de longitud
     const lenDiff = Math.abs(qNorm.length - nameNorm.length);
     const lengthScore = Math.max(0, 60 - Math.min(lenDiff, 60));
 
-    /* ---------------------------------------------------------------
-     * 5. BONUS EXTRA: MISMOS TOKENS EN NOMBRE Y QUERY
-     * ------------------------------------------------------------ */
+    // 5) Bonus: mismos tokens en nombre y query
     const sameTokensSet =
         tokensName.length &&
         uniqueQTokens.length === tokensName.length &&
-        uniqueQTokens.every(t => tokensName.includes(t));
+        uniqueQTokens.every((t) => tokensName.includes(t));
 
     const sameTokensScore = sameTokensSet ? 180 : 0;
 
-    /* ---------------------------------------------------------------
-     * 6. SUMA FINAL
-     * ------------------------------------------------------------ */
     const finalScore =
         exactName +
         prefixName +
@@ -499,36 +310,20 @@ function computeCompanyScore(company, qNorm, qTokens) {
 }
 
 /**
- * listCompaniesRanked
- * -------------------
- * MODO "RANKER PRO":
- *   - Se activa cuando:
- *       * hay q normalizado (safeQ)
- *       * NO hay sortBy (el orden lo define el ranker)
- *
- * Lógica:
- *   1. Construye filtros base SIN q (includeTextFilter = false).
- *   2. Obtiene todas las empresas que pasan los filtros base.
- *   3. Calcula un score para cada una con computeCompanyScore.
- *   4. Descarta las de score 0.
- *   5. Ordena por score desc, luego name asc, luego createdAt desc.
- *   6. Aplica paginación en memoria.
- *   7. Adjunta logo_full_path.
+ * Listado con ranking avanzado (q presente, sortBy ausente).
+ * Aplica filtros base SIN q, calcula score en memoria y pagina.
+ * @param {Object} queryParams
+ * @returns {Promise<{ meta: Object, data: Array }>}
  */
 async function listCompaniesRanked(queryParams = {}) {
     const { page, limit } = buildPaginationParams(queryParams);
 
-    const safeQ = normalizeSearchTerm(queryParams.q);
+    const safeQ = normalizeCompanySearchTerm(queryParams.q);
     if (!safeQ) {
-        // Por seguridad: si algo raro pasa, caemos al modo simple
         return listCompaniesSimple(queryParams);
     }
 
-    const filters = buildCompanyFilters(queryParams, {
-        includeTextFilter: false
-    });
-
-    // Traemos las empresas que cumplen los filtros base
+    const filters = buildCompanyFilters(queryParams, { includeTextFilter: false });
     const candidates = await Company.find(filters).lean();
 
     const qTokens = tokenize(safeQ);
@@ -536,27 +331,19 @@ async function listCompaniesRanked(queryParams = {}) {
 
     for (const c of candidates) {
         const score = computeCompanyScore(c, safeQ, qTokens);
-        if (score <= 0) continue;
-
-        scored.push({ score, company: c });
+        if (score > 0) scored.push({ score, company: c });
     }
 
-    // Orden por score desc, luego name asc, luego createdAt desc
     scored.sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score;
 
         const nameA = (a.company.name || "").toLowerCase();
         const nameB = (b.company.name || "").toLowerCase();
-        const cmpName = nameA.localeCompare(nameB);
-        if (cmpName !== 0) return cmpName;
+        const cmp = nameA.localeCompare(nameB);
+        if (cmp !== 0) return cmp;
 
-        const createdA = a.company.createdAt
-            ? new Date(a.company.createdAt).getTime()
-            : 0;
-        const createdB = b.company.createdAt
-            ? new Date(b.company.createdAt).getTime()
-            : 0;
-
+        const createdA = a.company.createdAt ? new Date(a.company.createdAt).getTime() : 0;
+        const createdB = b.company.createdAt ? new Date(b.company.createdAt).getTime() : 0;
         return createdB - createdA;
     });
 
@@ -565,150 +352,78 @@ async function listCompaniesRanked(queryParams = {}) {
     const start = (page - 1) * limit;
     const end = start + limit;
 
-    const pageItems = scored.slice(start, end).map(item => item.company);
-    const dataWithLogo = pageItems.map(attachLogoFullPath);
+    const pageItems = scored.slice(start, end).map((x) => x.company);
 
     return {
-        meta: {
-            page,
-            limit,
-            total,
-            totalPages
-        },
-        data: dataWithLogo
+        meta: { page, limit, total, totalPages },
+        data: pageItems.map(attachLogoFullPath)
     };
 }
 
 /**
- * listCompaniesSimple
- * -------------------
- * MODO SIMPLE (sin rank avanzado):
- *   - Se usa cuando:
- *       * no hay q, o
- *       * hay q PERO el cliente envió sortBy (entonces se respeta sortBy/sortDir)
- *
- * Lógica:
- *   - Aplica buildCompanyFilters con includeTextFilter = true (usa regex).
- *   - Aplica buildCompanySort.
- *   - Aplica paginación con skip/limit en Mongo.
- *   - Adjunta logo_full_path.
+ * Listado simple: filtros + regex(q) + sortBy/sortDir + paginación en Mongo.
+ * @param {Object} queryParams
+ * @returns {Promise<{ meta: Object, data: Array }>}
  */
 async function listCompaniesSimple(queryParams = {}) {
     const { page, limit, skip } = buildPaginationParams(queryParams);
-    const filters = buildCompanyFilters(queryParams, {
-        includeTextFilter: true
-    });
+
+    const filters = buildCompanyFilters(queryParams, { includeTextFilter: true });
     const sort = buildCompanySort(queryParams);
 
     const [total, companies] = await Promise.all([
         Company.countDocuments(filters),
-        Company.find(filters)
-            .sort(sort)
-            .skip(skip)
-            .limit(limit)
-            .lean()
+        Company.find(filters).sort(sort).skip(skip).limit(limit).lean()
     ]);
 
     const totalPages = Math.ceil(total / limit) || 1;
-    const dataWithLogo = companies.map(attachLogoFullPath);
 
     return {
-        meta: {
-            page,
-            limit,
-            total,
-            totalPages
-        },
-        data: dataWithLogo
+        meta: { page, limit, total, totalPages },
+        data: companies.map(attachLogoFullPath)
     };
 }
 
-/* ============================================================================
- *  SERVICIO PRINCIPAL DE LISTADO
- * ============================================================================
+/* =============================================================================
+ * Servicios expuestos
+ * =============================================================================
  */
 
 /**
- * listCompaniesService
- * --------------------
- * Lógica para:
- *   GET /api/companies
- *
- * Modo de operación:
- *   - Si hay q (después de normalizar) Y NO hay sortBy →
- *       → modo ranker avanzado (listCompaniesRanked)
- *
- *   - En cualquier otro caso →
- *       → modo simple (listCompaniesSimple)
- *
- * Contrato de salida:
- *   {
- *     meta: {
- *       page: number,
- *       limit: number,
- *       total: number,
- *       totalPages: number
- *     },
- *     data: Array<Company & { logo_full_path: string | null }>
- *   }
+ * Servicio: listado de empresas.
+ * - Si hay q normalizada y NO hay sortBy => ranking avanzado.
+ * - En cualquier otro caso => listado simple.
+ * @param {Object} queryParams
+ * @returns {Promise<{ meta: Object, data: Array }>}
  */
 export async function listCompaniesService(queryParams = {}) {
-    const safeQ = normalizeSearchTerm(queryParams.q);
+    const safeQ = normalizeCompanySearchTerm(queryParams.q);
     const hasCustomSort = Boolean(queryParams.sortBy);
 
     if (safeQ && !hasCustomSort) {
-        // Usamos el q normalizado internamente
-        const normalizedParams = { ...queryParams, q: safeQ };
-        return listCompaniesRanked(normalizedParams);
+        return listCompaniesRanked({ ...queryParams, q: safeQ });
     }
 
     return listCompaniesSimple(queryParams);
 }
 
-/* ============================================================================
- *  OTROS SERVICIOS
- * ============================================================================
- */
-
 /**
- * getCompanyByIdService
- * ---------------------
- * Lógica para:
- *   GET /api/companies/:id
- *
- * @param {string} id - _id de MongoDB.
- *
- * @returns {Promise<object | null>}
- *   - objeto Company + logo_full_path
- *   - null si no existe
+ * Servicio: obtener empresa por _id (Mongo).
+ * @param {string} id
+ * @returns {Promise<Object|null>}
  */
 export async function getCompanyByIdService(id) {
     const company = await Company.findById(id).lean();
     if (!company) return null;
-
     return attachLogoFullPath(company);
 }
 
 /**
- * getCompanyJobsService
- * ---------------------
- * Lógica para:
- *   GET /api/companies/:id/jobs
- *
- * Soporta filtros básicos (los mismos que tenías):
- *   - country
- *   - state
- *   - city
- *   - work_type
- *   - pay_period
- *
- * Orden:
- *   - Siempre por listed_time desc (recientes primero).
- *
- * @returns {
- *   meta: { page, limit, total, totalPages },
- *   data: Job[]
- * }
+ * Servicio: empleos de una empresa (listado simple).
+ * Orden fijo: listed_time desc.
+ * @param {any} companyId
+ * @param {Object} queryParams
+ * @returns {Promise<{ meta: Object, data: Array }>}
  */
 export async function getCompanyJobsService(companyId, queryParams = {}) {
     const { page, limit, skip } = buildPaginationParams(queryParams);
@@ -717,44 +432,28 @@ export async function getCompanyJobsService(companyId, queryParams = {}) {
 
     const filters = { company_id: companyId };
 
-    if (country)    filters.country = country;
-    if (state)      filters.state = state;
-    if (city)       filters.city = city;
-    if (work_type)  filters.work_type = work_type;
+    if (country) filters.country = country;
+    if (state) filters.state = state;
+    if (city) filters.city = city;
+    if (work_type) filters.work_type = work_type;
     if (pay_period) filters.pay_period = pay_period;
 
     const [total, jobs] = await Promise.all([
         Job.countDocuments(filters),
-        Job.find(filters)
-            .sort({ listed_time: -1 })
-            .skip(skip)
-            .limit(limit)
-            .lean()
+        Job.find(filters).sort({ listed_time: -1 }).skip(skip).limit(limit).lean()
     ]);
 
     const totalPages = Math.ceil(total / limit) || 1;
 
     return {
-        meta: {
-            page,
-            limit,
-            total,
-            totalPages
-        },
+        meta: { page, limit, total, totalPages },
         data: jobs
     };
 }
 
 /**
- * getCompanyFilterOptionsService
- * ------------------------------
- * Lógica para:
- *   GET /api/companies/filters/options
- *
- * Devuelve distincts:
- *   - countries
- *   - states
- *   - cities
+ * Servicio: opciones de filtros para empresas (distincts).
+ * @returns {Promise<{ countries: string[], states: string[], cities: string[] }>}
  */
 export async function getCompanyFilterOptionsService() {
     const [countries, states, cities] = await Promise.all([
@@ -765,20 +464,15 @@ export async function getCompanyFilterOptionsService() {
 
     return {
         countries: countries.filter(Boolean).sort(),
-        states:    states.filter(Boolean).sort(),
-        cities:    cities.filter(Boolean).sort()
+        states: states.filter(Boolean).sort(),
+        cities: cities.filter(Boolean).sort()
     };
 }
 
 /**
- * createCompanyService
- * --------------------
- * Lógica para:
- *   POST /api/companies
- *
- * @param {object} payload - req.body con los datos de la empresa.
- *
- * @returns {Promise<object>} Empresa creada + logo_full_path
+ * Servicio: crear empresa.
+ * @param {Object} payload
+ * @returns {Promise<Object>}
  */
 export async function createCompanyService(payload) {
     const created = await Company.create(payload);
@@ -786,38 +480,20 @@ export async function createCompanyService(payload) {
 }
 
 /**
- * updateCompanyService
- * --------------------
- * Lógica para:
- *   PUT /api/companies/:id
- *
- * @param {string} id      - _id de MongoDB.
- * @param {object} payload - req.body con los campos a actualizar.
- *
- * @returns {Promise<object | null>}
- *   - empresa actualizada + logo_full_path
- *   - null si no existe
+ * Servicio: actualizar empresa.
+ * @param {string} id
+ * @param {Object} payload
+ * @returns {Promise<Object|null>}
  */
 export async function updateCompanyService(id, payload) {
-    const updated = await Company.findByIdAndUpdate(
-        id,
-        payload,
-        { new: true }
-    ).lean();
-
+    const updated = await Company.findByIdAndUpdate(id, payload, { new: true }).lean();
     if (!updated) return null;
-
     return attachLogoFullPath(updated);
 }
 
 /**
- * deleteCompanyService
- * --------------------
- * Lógica para:
- *   DELETE /api/companies/:id
- *
- * @param {string} id - _id de MongoDB.
- *
+ * Servicio: eliminar empresa.
+ * @param {string} id
  * @returns {Promise<{ deleted: boolean }>}
  */
 export async function deleteCompanyService(id) {
@@ -825,34 +501,36 @@ export async function deleteCompanyService(id) {
     return { deleted: Boolean(deleted) };
 }
 
-/* ============================================================================
- *  LOGO UPLOAD (GUARDAR EN ORIGINAL + PROCESSED CON company_id.png)
- * ============================================================================
+/* =============================================================================
+ * Logo upload: guarda <company_id>.png en original y processed
+ * =============================================================================
+ */
+
+/**
+ * Actualiza el logo de una empresa.
  *
  * Reglas:
- * - Se guarda SIEMPRE como: <company_id>.png
- * - Se escribe en:
+ * - Nombre fijo: <company_id>.png
+ * - Se sobrescribe si existe.
+ * - Se guarda en:
  *     data/company_logos/original/<company_id>.png
  *     data/company_logos/processed/<company_id>.png
  *
- * - NO usa temp.
- * - Si ya existe, se sobrescribe.
+ * Entradas típicas (desde controller con multer memoryStorage):
+ * - mongoCompanyId: req.params.id
+ * - fileBuffer: req.file.buffer
  *
- * @param {string} mongoCompanyId - _id de Mongo (req.params.id).
- * @param {Buffer} fileBuffer - req.file.buffer (multer memoryStorage).
- *
- * @returns {Promise<object|null>}
- *   - Empresa con logo_full_path si existe
- *   - null si no existe
+ * @param {string} mongoCompanyId
+ * @param {Buffer} fileBuffer
+ * @returns {Promise<Object|null>} Empresa (con logo_full_path) o null si no existe
  */
 export async function updateCompanyLogoService(mongoCompanyId, fileBuffer) {
     const company = await Company.findById(mongoCompanyId).lean();
     if (!company) return null;
 
     const companyId = company.company_id;
-
-    if (companyId === undefined || companyId === null) {
-        throw new Error("La empresa no tiene company_id (no se puede nombrar el logo).");
+    if (companyId === undefined || companyId === null || String(companyId).trim() === "") {
+        throw new Error("La empresa no tiene company_id; no se puede nombrar el archivo del logo.");
     }
 
     const ROOT = process.cwd();
@@ -860,25 +538,17 @@ export async function updateCompanyLogoService(mongoCompanyId, fileBuffer) {
     const ORIGINAL_DIR = path.join(BASE_DIR, "original");
     const PROCESSED_DIR = path.join(BASE_DIR, "processed");
 
-    // asegurar carpetas
     if (!fs.existsSync(ORIGINAL_DIR)) fs.mkdirSync(ORIGINAL_DIR, { recursive: true });
     if (!fs.existsSync(PROCESSED_DIR)) fs.mkdirSync(PROCESSED_DIR, { recursive: true });
 
-    const fileName = `${companyId}.png`;
+    const fileName = `${String(companyId).trim()}.png`;
     const originalPath = path.join(ORIGINAL_DIR, fileName);
 
-    // 1) Guardar en ORIGINAL como PNG (sin temp)
-    //    (convertimos a png aunque suban jpg/webp para cumplir "<id>.png")
+    // 1) Persistir ORIGINAL como PNG
     await sharp(fileBuffer).png().toFile(originalPath);
 
-    // 2) Generar PROCESSED con tu pipeline (cuadrado transparente)
-    await standardizeLogo(
-        originalPath,
-        PROCESSED_DIR,
-        DEFAULT_LOGO_SIZE,
-        fileName
-    );
+    // 2) Generar PROCESSED cuadrado con tu pipeline (mismo nombre final)
+    await standardizeLogo(originalPath, PROCESSED_DIR, DEFAULT_LOGO_SIZE, fileName);
 
-    // Regresar la empresa con logo_full_path (misma forma que ya usas)
     return attachLogoFullPath(company);
 }

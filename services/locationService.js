@@ -77,53 +77,12 @@ import { MinHeap } from "../utils/minHeap.js";
 /* ============================================================================
  *  NORMALIZADOR / TOKENIZADOR — similar a JobController (entrada ultra limpia)
  * ============================================================================
- */
-
-/**
- * normalize
- * ---------
- * Normaliza una cadena para comparar/buscar:
- *   - Convierte a string
- *   - Pasa a minúsculas
- *   - Normaliza Unicode (NFD)
- *   - Elimina acentos (ñ -> n, é -> e, etc.)
- *   - Elimina símbolos no alfanuméricos (dejamos solo letras, números y espacios)
- *   - Colapsa espacios múltiples a uno solo
- *   - Hace trim
  *
- * Ejemplos:
- *   - "   MéXiCo  "    → "mexico"
- *   - "Coahuila!!!"    → "coahuila"
- *   - "Torréon  Coah." → "torreon coah"
+ * REUSO DE UTILS:
+ * - normalize() y tokenize() ya existen en tus utils (utils/text.js)
+ * - Aquí NO redefinimos esas funciones para no duplicar lógica.
  */
-function normalize(str = "") {
-    return String(str)
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "") // quitar acentos
-        .replace(/[^a-z0-9\s]/g, " ")    // sustituir símbolos por espacio
-        .replace(/\s+/g, " ")            // colapsar espacios
-        .trim();
-}
-
-/**
- * tokenize
- * --------
- * Convierte un string en una lista de tokens (palabras) normalizados:
- *   1. Normaliza (con normalize)
- *   2. Divide por espacios
- *   3. Filtra tokens vacíos
- *   4. Elimina duplicados
- *
- * Ejemplo:
- *   tokenize("  Ciudad   de   Mexico!! ") → ["ciudad", "de", "mexico"]
- */
-function tokenize(str = "") {
-    const n = normalize(str);
-    if (!n) return [];
-    const parts = n.split(" ").filter(Boolean);
-    return [...new Set(parts)];
-}
+import { normalize, tokenize } from "../utils/text.js";
 
 /* ============================================================================
  *  ÍNDICE DE BÚSQUEDA EN MEMORIA
@@ -427,6 +386,7 @@ function computeLocationScore(entry, qNorm, qTokens) {
         let i = 0;
         let j = 0;
         while (i < tokensMain.length && j < uniqueQTokens.length) {
+            // NOTA: aquí se conserva EXACTAMENTE la comparación original
             if (tokensMain[i] === uniqueQTokens[j]) {
                 j++;
             }
@@ -684,7 +644,7 @@ export async function searchLocationsService(qRaw, kRaw) {
     const DEFAULT_K = 20;
 
     const q = qRaw || "";
-    const k = parseInt(kRaw || DEFAULT_K, 10) || DEFAULT_K;
+    const k = parseInt(String(kRaw || DEFAULT_K), 10) || DEFAULT_K;
 
     // Si el query está vacío (solo espacios), regresamos lista vacía
     if (!q.trim()) {
