@@ -20,7 +20,7 @@
  *   GET /api/locations/search?q=texto&k=20
  *      → Buscador global con ranking por relevancia (tipo PageRank).
  *
- * Todas las rutas se apoyan en el controlador locationController.js.
+ * Todas las rutas se apoyan en el controlador locationService.js.
  * ============================================================================
  */
 

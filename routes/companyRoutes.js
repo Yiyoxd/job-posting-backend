@@ -1,22 +1,5 @@
 /**
- * ============================================================================
- *  companyRoutes.js — RUTAS DE EMPRESAS
- * ============================================================================
- *
- * Prefijo recomendado: /api/companies
- *
- *   GET    /                 → getCompanies
- *   GET    /filters/options  → getCompanyFilterOptions
- *   GET    /:id/jobs         → getCompanyJobs
- *   GET    /:id              → getCompanyById
- *   POST   /                 → createCompany
- *   PUT    /:id              → updateCompany
- *   DELETE /:id              → deleteCompany
- *
- * Orden IMPORTANTE:
- *   - "/filters/options" y "/:id/jobs" van antes de "/:id".
- *     Esto evita que Express confunda ":id" con "filters" o "jobs".
- * ============================================================================
+ * companyRoutes.js — RUTAS DE EMPRESAS
  */
 
 import express from "express";
@@ -36,19 +19,19 @@ const router = express.Router();
 // Listado principal con filtros
 router.get("/", getCompanies);
 
-// Opciones para filtros del frontend (countries, states, cities)
+// Opciones para filtros del frontend
 router.get("/filters/options", getCompanyFilterOptions);
 
-// Empleos de una empresa (con filtros y paginación)
+// Empleos de una empresa
 router.get("/:id/jobs", getCompanyJobs);
 
-// Detalle de una empresa por ID
+// Detalle de empresa
 router.get("/:id", getCompanyById);
 
 // Crear nueva empresa
 router.post("/", createCompany);
 
-// Actualizar empresa existente
+// Actualizar empresa
 router.put("/:id", updateCompany);
 
 // Eliminar empresa

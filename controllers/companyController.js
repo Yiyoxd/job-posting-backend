@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- *  companyController.js — CONTROLADOR DE EMPRESAS
+ *  companyController.js — CONTROLADOR DE EMPRESAS (DELGADO + RANKER PRO)
  * ============================================================================
  *
  * Endpoints (ver companyRoutes.js):
@@ -38,112 +38,64 @@
  *   - page, limit (igual que en jobs)
  *   - sortBy  → name | createdAt | country
  *   - sortDir → asc | desc
+ *
+ * IMPORTANTE PARA EL FRONTEND:
+ * -----------------------------
+ * 1. GET /api/companies
+ *    Respuesta:
+ *      {
+ *        "meta": { page, limit, total, totalPages },
+ *        "data": [
+ *          {
+ *            ...campos de Company...
+ *            "logo_full_path": "https://tu-backend.com/company_logos/processed/268.png"
+ *          },
+ *          ...
+ *        ]
+ *      }
+ *
+ *    - Cuando el cliente ENVÍA q y NO envía sortBy:
+ *        → Los resultados vienen ordenados por RELEVANCIA (ranker avanzado).
+ *
+ *    - Cuando NO envía q, o envía q + sortBy:
+ *        → Se respeta sortBy/sortDir y q se aplica como filtro regex simple.
+ *
+ * 2. GET /api/companies/:id
+ *    Respuesta:
+ *      {
+ *        ...campos de Company...
+ *        "logo_full_path": "..."
+ *      }
+ *
+ * 3. POST /api/companies, PUT /api/companies/:id
+ *    También regresan la empresa con logo_full_path.
  * ============================================================================
  */
 
-import Company from "../models/Company.js";
-import Job from "../models/Job.js";
-
-function parseNumber(value) {
-    if (value === undefined) return null;
-    const n = Number(value);
-    return Number.isNaN(n) ? null : n;
-}
-
-/**
- * Construye filtros para la entidad Company a partir de req.query.
- */
-function buildCompanyFilters(queryParams = {}) {
-    const {
-        q,
-        country,
-        state,
-        city,
-        min_size,
-        max_size
-    } = queryParams;
-
-    const filter = {};
-
-    // Búsqueda por texto (nombre / descripción)
-    if (q && q.trim()) {
-        const regex = new RegExp(q.trim(), "i");
-        filter.$or = [
-            { name: regex },
-            { description: regex }
-        ];
-    }
-
-    // Filtros por ubicación
-    if (country) filter.country = country;
-    if (state)   filter.state = state;
-    if (city)    filter.city = city;
-
-    // Filtros por tamaño de empresa
-    const minSize = parseNumber(min_size);
-    const maxSize = parseNumber(max_size);
-
-    // Si tenemos tamaño mínimo, pedimos empresas cuyo company_size_max >= minSize
-    if (minSize !== null) {
-        filter.company_size_max = { ...(filter.company_size_max || {}), $gte: minSize };
-    }
-
-    // Si tenemos tamaño máximo, pedimos empresas cuyo company_size_min <= maxSize
-    if (maxSize !== null) {
-        filter.company_size_min = { ...(filter.company_size_min || {}), $lte: maxSize };
-    }
-
-    return filter;
-}
-
-/**
- * Construye objeto sort para Company.
- */
-function buildCompanySort(queryParams = {}) {
-    const { sortBy, sortDir } = queryParams;
-
-    const allowed = new Set(["name", "createdAt", "country"]);
-    const field = allowed.has(sortBy) ? sortBy : "name";
-    const direction = sortDir === "desc" ? -1 : 1;
-
-    return { [field]: direction };
-}
+import {
+    listCompaniesService,
+    getCompanyByIdService,
+    getCompanyJobsService,
+    getCompanyFilterOptionsService,
+    createCompanyService,
+    updateCompanyService,
+    deleteCompanyService
+} from "../services/companyService.js";
 
 /* =============================================================================
- *  GET /api/companies — Listado con filtros, paginación y ordenamiento
+ *  GET /api/companies — Listado con filtros, paginación y rank inteligente
  * =============================================================================
  */
 export async function getCompanies(req, res) {
     try {
-        const page  = Math.max(parseInt(req.query.page || "1", 10), 1);
-        const limit = Math.max(parseInt(req.query.limit || "20", 10), 1);
-        const skip  = (page - 1) * limit;
+        const result = await listCompaniesService(req.query);
 
-        const filters = buildCompanyFilters(req.query);
-        const sort    = buildCompanySort(req.query);
-
-        const [total, companies] = await Promise.all([
-            Company.countDocuments(filters),
-            Company.find(filters)
-                .sort(sort)
-                .skip(skip)
-                .limit(limit)
-        ]);
-
-        const totalPages = Math.ceil(total / limit) || 1;
-
-        res.json({
-            meta: {
-                page,
-                limit,
-                total,
-                totalPages
-            },
-            data: companies
-        });
+        // result ya viene en formato:
+        // { meta: {...}, data: [ { ...company, logo_full_path }, ... ] }
+        return res.json(result);
 
     } catch (err) {
-        res.status(500).json({
+        return res.status(500).json({
             error: "Error al obtener empresas",
             details: err.message
         });
@@ -156,16 +108,17 @@ export async function getCompanies(req, res) {
  */
 export async function getCompanyById(req, res) {
     try {
-        const company = await Company.findById(req.params.id);
+        const company = await getCompanyByIdService(req.params.id);
 
         if (!company) {
             return res.status(404).json({ error: "Empresa no encontrada" });
         }
 
-        res.json(company);
+        // company ya incluye logo_full_path
+        return res.json(company);
 
     } catch (err) {
-        res.status(500).json({
+        return res.status(500).json({
             error: "Error al obtener empresa",
             details: err.message
         });
@@ -174,52 +127,31 @@ export async function getCompanyById(req, res) {
 
 /* =============================================================================
  *  GET /api/companies/:id/jobs — Empleos de una empresa
- * -----------------------------------------------------------------------------
- *  Soporta los mismos filtros que getJobs, excepto company_id (forzado aquí).
+ * ----------------------------------------------------------------------------- *
+ *  Soporta los mismos filtros que tenías:
+ *   - country
+ *   - state
+ *   - city
+ *   - work_type
+ *   - pay_period
+ *
+ *  La respuesta se mantiene:
+ *    {
+ *      meta: { page, limit, total, totalPages },
+ *      data: [ ...jobs ]
+ *    }
  * =============================================================================
  */
 export async function getCompanyJobs(req, res) {
     try {
         const companyId = req.params.id;
 
-        const page  = Math.max(parseInt(req.query.page || "1", 10), 1);
-        const limit = Math.max(parseInt(req.query.limit || "20", 10), 1);
-        const skip  = (page - 1) * limit;
+        const result = await getCompanyJobsService(companyId, req.query);
 
-        // Reutilizamos la lógica de filtros de jobs importándola aquí si quieres,
-        // pero para no hacer import cruzado, haremos una versión sencilla.
-        const { country, state, city, work_type, pay_period } = req.query;
-
-        const filters = { company_id: companyId };
-
-        if (country)   filters.country = country;
-        if (state)     filters.state = state;
-        if (city)      filters.city = city;
-        if (work_type) filters.work_type = work_type;
-        if (pay_period) filters.pay_period = pay_period;
-
-        const [total, jobs] = await Promise.all([
-            Job.countDocuments(filters),
-            Job.find(filters)
-                .sort({ listed_time: -1 })
-                .skip(skip)
-                .limit(limit)
-        ]);
-
-        const totalPages = Math.ceil(total / limit) || 1;
-
-        res.json({
-            meta: {
-                page,
-                limit,
-                total,
-                totalPages
-            },
-            data: jobs
-        });
+        return res.json(result);
 
     } catch (err) {
-        res.status(500).json({
+        return res.status(500).json({
             error: "Error al obtener empleos de la empresa",
             details: err.message
         });
@@ -232,20 +164,18 @@ export async function getCompanyJobs(req, res) {
  */
 export async function getCompanyFilterOptions(req, res) {
     try {
-        const [countries, states, cities] = await Promise.all([
-            Company.distinct("country"),
-            Company.distinct("state"),
-            Company.distinct("city"),
-        ]);
+        const options = await getCompanyFilterOptionsService();
 
-        res.json({
-            countries: countries.filter(Boolean).sort(),
-            states:    states.filter(Boolean).sort(),
-            cities:    cities.filter(Boolean).sort()
-        });
+        // options:
+        // {
+        //   countries: string[],
+        //   states:    string[],
+        //   cities:    string[]
+        // }
+        return res.json(options);
 
     } catch (err) {
-        res.status(500).json({
+        return res.status(500).json({
             error: "Error al obtener opciones de filtros para empresas",
             details: err.message
         });
@@ -258,11 +188,13 @@ export async function getCompanyFilterOptions(req, res) {
  */
 export async function createCompany(req, res) {
     try {
-        const company = await Company.create(req.body);
-        res.status(201).json(company);
+        const company = await createCompanyService(req.body);
+
+        // company ya viene con logo_full_path
+        return res.status(201).json(company);
 
     } catch (err) {
-        res.status(500).json({
+        return res.status(500).json({
             error: "Error al crear empresa",
             details: err.message
         });
@@ -275,20 +207,17 @@ export async function createCompany(req, res) {
  */
 export async function updateCompany(req, res) {
     try {
-        const updated = await Company.findByIdAndUpdate(
-            req.params.id,
-            req.body,
-            { new: true }
-        );
+        const updated = await updateCompanyService(req.params.id, req.body);
 
         if (!updated) {
             return res.status(404).json({ error: "Empresa no encontrada" });
         }
 
-        res.json(updated);
+        // updated ya viene con logo_full_path
+        return res.json(updated);
 
     } catch (err) {
-        res.status(500).json({
+        return res.status(500).json({
             error: "Error al actualizar empresa",
             details: err.message
         });
@@ -301,16 +230,16 @@ export async function updateCompany(req, res) {
  */
 export async function deleteCompany(req, res) {
     try {
-        const deleted = await Company.findByIdAndDelete(req.params.id);
+        const { deleted } = await deleteCompanyService(req.params.id);
 
         if (!deleted) {
             return res.status(404).json({ error: "Empresa no encontrada" });
         }
 
-        res.json({ message: "Empresa eliminada correctamente" });
+        return res.json({ message: "Empresa eliminada correctamente" });
 
     } catch (err) {
-        res.status(500).json({
+        return res.status(500).json({
             error: "Error al eliminar empresa",
             details: err.message
         });

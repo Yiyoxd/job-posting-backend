@@ -11,10 +11,9 @@ import mongoose from "mongoose";
 
 const jobSchema = new mongoose.Schema({
 
-    // Identificador externo opcional
+    // Identificador interno/incremental de la vacante
     job_id: {
-        type: String,
-        trim: true,
+        type: Number,
         index: true
     },
 
@@ -63,10 +62,9 @@ const jobSchema = new mongoose.Schema({
         index: true
     },
 
-    // Relación con la empresa que publicó el empleo
+    // Relación con la empresa que publicó el empleo (por company_id numérico)
     company_id: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Company",
+        type: Number,
         required: true,
         index: true
     }
@@ -86,6 +84,7 @@ const jobSchema = new mongoose.Schema({
  *     createdAt
  *     updatedAt
  * - Si company_id viene populado, también se limpia igual.
+ *   (En el esquema actual company_id es Number, así que normalmente no aplica)
  * =============================================================================
  */
 jobSchema.set("toJSON", {
@@ -98,7 +97,7 @@ jobSchema.set("toJSON", {
         delete ret.createdAt;
         delete ret.updatedAt;
 
-        // Si viene company_id populado, también lo limpiamos
+        // Si viene company_id populado como objeto por algún motivo, también lo limpiamos
         if (ret.company_id && typeof ret.company_id === "object") {
             delete ret.company_id._id;
             delete ret.company_id.__v;

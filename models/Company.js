@@ -14,6 +14,14 @@ const companySchema = new mongoose.Schema({
         index: true
     },
 
+    // Identificador incremental interno de la empresa
+    company_id: {
+        type: Number,
+        required: true,
+        unique: true,
+        index: true
+    },
+
     description: String,
 
     // Ubicación global

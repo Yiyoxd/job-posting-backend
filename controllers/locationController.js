@@ -1,171 +1,244 @@
 /**
  * ============================================================================
- *  locationController.js — CONTROLADOR DE UBICACIONES (ULTRA RÁPIDO)
+ *  locationController.js — CONTROLADOR DE UBICACIONES (ULTRA RÁPIDO + RANKER PRO)
  * ============================================================================
  *
- * Este archivo contiene:
+ * Endpoints (NO CAMBIAN):
  *
- *   ✔ Acceso con CACHE EN MEMORIA
- *   ✔ Búsqueda global con MinHeap (TOP-K eficiente)
- *   ✔ Normalización para búsquedas flexibles
- *   ✔ Documentación completa para cada endpoint
+ *   GET  /api/locations/countries
+ *        → Lista de países.
  *
+ *   GET  /api/locations/:country/states
+ *        → Lista de estados de un país.
+ *
+ *   GET  /api/locations/:country/:state/cities
+ *        → Lista de ciudades de un estado.
+ *
+ *   GET  /api/locations/search?q=texto&k=20
+ *        → Buscador global (país / estado / ciudad) con ranking avanzado.
+ *
+ * Este archivo:
+ *   - NO contiene lógica de ranking, cache ni MinHeap.
+ *   - SOLO:
+ *       * Lee req.params / req.query
+ *       * Llama a locationService
+ *       * Maneja códigos de estado y estructura final de la respuesta HTTP
+ *
+ * Toda la lógica pesada vive en:
+ *   - services/locationService.js
  * ============================================================================
  */
 
 import {
-    loadLocationCache,
-    getAllLocations,
-    getCountry
-} from "../utils/locationCache.js";
-
-import { MinHeap } from "../utils/minHeap.js";
-
-/* ============================================================================ */
-/* NORMALIZADOR — convierte texto a formato uniforme */
-/* ============================================================================ */
-function normalize(str = "") {
-    return str
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "") // acentos
-        .replace(/[^a-z0-9\s]/g, "")     // símbolos
-        .trim();
-}
-
-/* ============================================================================ */
-/* computeScore — Algoritmo de ranking (tipo PageRank mejorado) */
-/* ============================================================================ */
-function computeScore(text, query) {
-    const t = normalize(text);
-
-    if (t === query) return 100;
-    if (t.startsWith(query)) return 80;
-    if (t.includes(query)) return 50;
-
-    return 20 - Math.min(Math.abs(t.length - query.length), 10);
-}
-
-/* ============================================================================ */
-/* collectMatches — Búsqueda con MinHeap*/
-/* ============================================================================ */
-function collectMatches(docs, query, k) {
-    const qNorm = normalize(query);
-    const heap = new MinHeap(k);
-
-    for (const doc of docs) {
-        const countryNorm = normalize(doc.country);
-
-        if (countryNorm.includes(qNorm)) {
-            heap.push({
-                type: "country",
-                country: doc.country,
-                score: computeScore(doc.country, qNorm)
-            });
-        }
-
-        for (const stateObj of doc.states) {
-            const stateNorm = normalize(stateObj.state);
-
-            if (stateNorm.includes(qNorm)) {
-                heap.push({
-                    type: "state",
-                    country: doc.country,
-                    state: stateObj.state,
-                    score: computeScore(stateObj.state, qNorm)
-                });
-            }
-
-            for (const city of stateObj.cities) {
-                const cityNorm = normalize(city);
-
-                if (cityNorm.includes(qNorm)) {
-                    heap.push({
-                        type: "city",
-                        country: doc.country,
-                        state: stateObj.state,
-                        city,
-                        score: computeScore(city, qNorm)
-                    });
-                }
-            }
-        }
-    }
-
-    return heap.getSorted();
-}
+    getCountriesService,
+    getStatesByCountryService,
+    getCitiesByStateService,
+    searchLocationsService
+} from "../services/locationService.js";
 
 /* =============================================================================
  *  GET /api/locations/countries — Lista de países
  * =============================================================================
  */
+
+/**
+ * GET /api/locations/countries
+ * ----------------------------
+ * Devuelve la lista de países disponibles en el sistema.
+ *
+ * NO recibe parámetros.
+ *
+ * RESPUESTA (200 OK):
+ *   [
+ *     "Afghanistan",
+ *     "Argentina",
+ *     "Brazil",
+ *     "Mexico",
+ *     ...
+ *   ]
+ *
+ * Uso típico en frontend:
+ *   - Llenar un combo de países en formularios de filtros o registro.
+ */
 export async function getCountries(req, res) {
-    await loadLocationCache();
-
-    const docs = getAllLocations();
-    const countries = docs.map(d => d.country).sort();
-
-    return res.json(countries);
+    try {
+        const countries = await getCountriesService();
+        return res.json(countries);
+    } catch (err) {
+        return res.status(500).json({
+            error: "Error al obtener países",
+            details: err.message
+        });
+    }
 }
 
 /* =============================================================================
- *  GET /api/locations/:country/states — Lista de estados
+ *  GET /api/locations/:country/states — Lista de estados de un país
  * =============================================================================
+ */
+
+/**
+ * GET /api/locations/:country/states
+ * ----------------------------------
+ * Devuelve la lista de estados pertenecientes a un país.
+ *
+ * PATH PARAMS:
+ *   - country: string
+ *       Nombre del país tal como está guardado en la base/JSON
+ *       (ej. "Mexico", "United States", etc.).
+ *
+ * RESPUESTAS:
+ *
+ *   200 OK:
+ *     [
+ *       "Coahuila",
+ *       "Jalisco",
+ *       "Nuevo Leon",
+ *       ...
+ *     ]
+ *
+ *   404 Not Found:
+ *     { "error": "País no encontrado" }
+ *
+ * Uso típico en frontend:
+ *   - Cuando el usuario selecciona un país en un combo, llamar
+ *     a este endpoint para llenar el combo de estados.
  */
 export async function getStatesByCountry(req, res) {
     const { country } = req.params;
 
-    await loadLocationCache();
+    try {
+        const states = await getStatesByCountryService(country);
 
-    const doc = getCountry(country);
+        if (!states) {
+            return res.status(404).json({ error: "País no encontrado" });
+        }
 
-    if (!doc) return res.status(404).json({ error: "País no encontrado" });
-
-    return res.json(doc.states.map(s => s.state).sort());
+        return res.json(states);
+    } catch (err) {
+        return res.status(500).json({
+            error: "Error al obtener estados",
+            details: err.message
+        });
+    }
 }
 
 /* =============================================================================
  *  GET /api/locations/:country/:state/cities — Lista de ciudades
  * =============================================================================
  */
+
+/**
+ * GET /api/locations/:country/:state/cities
+ * -----------------------------------------
+ * Devuelve la lista de ciudades de un estado específico de un país.
+ *
+ * PATH PARAMS:
+ *   - country: string
+ *       País (ej. "Mexico").
+ *   - state: string
+ *       Estado (ej. "Coahuila").
+ *
+ * RESPUESTAS:
+ *
+ *   200 OK:
+ *     [
+ *       "Torreon",
+ *       "Saltillo",
+ *       ...
+ *     ]
+ *
+ *   404 Not Found:
+ *     { "error": "País no encontrado" }
+ *     { "error": "Estado no encontrado" }
+ *
+ * Uso típico en frontend:
+ *   - Después de seleccionar país y estado, obtener las ciudades
+ *     para completar filtros o formularios.
+ */
 export async function getCitiesByState(req, res) {
     const { country, state } = req.params;
 
-    await loadLocationCache();
+    try {
+        const result = await getCitiesByStateService(country, state);
 
-    const doc = getCountry(country);
-    if (!doc) return res.status(404).json({ error: "País no encontrado" });
+        if (result.status === "country_not_found") {
+            return res.status(404).json({ error: "País no encontrado" });
+        }
 
-    const stateObj = doc.states.find(s => s.state === state);
-    if (!stateObj) return res.status(404).json({ error: "Estado no encontrado" });
+        if (result.status === "state_not_found") {
+            return res.status(404).json({ error: "Estado no encontrado" });
+        }
 
-    return res.json(stateObj.cities.sort());
+        // status === "ok"
+        return res.json(result.cities);
+    } catch (err) {
+        return res.status(500).json({
+            error: "Error al obtener ciudades",
+            details: err.message
+        });
+    }
 }
 
 /* =============================================================================
  *  GET /api/locations/search?q=texto&k=20 — Buscador global ultra rápido
  * =============================================================================
  */
-export async function searchLocations(req, res) {
-    const DEFAULT_K = 20;
 
+/**
+ * GET /api/locations/search
+ * -------------------------
+ * Buscador global de ubicaciones (país / estado / ciudad) con ranking avanzado.
+ *
+ * QUERY PARAMS:
+ *   - q : string (OBLIGATORIO)
+ *       Texto de búsqueda. Puede ser:
+ *         * Un país completo:       "Mexico"
+ *         * Un estado:              "Coahuila"
+ *         * Una ciudad:             "Torreon"
+ *         * Parte de cualquiera:    "tor", "mex", "coah", etc.
+ *
+ *   - k : number (opcional, default = 20)
+ *       Número máximo de resultados a devolver.
+ *
+ * RESPUESTA (200 OK):
+ *   {
+ *     "results": [
+ *       {
+ *         "type": "city" | "state" | "country",
+ *         "country": string,
+ *         "state"?: string,
+ *         "city"?: string
+ *       },
+ *       ...
+ *     ]
+ *   }
+ *
+ * Notas para el frontend:
+ *   - Los resultados ya vienen ordenados por relevancia (primeros = mejores).
+ *   - "type" indica el nivel de la coincidencia:
+ *        * "city"    → match muy específico (lo más detallado)
+ *        * "state"   → match a nivel estado
+ *        * "country" → match genérico a país
+ *   - No se expone el "score" interno, solo la ubicación.
+ *
+ * Ejemplos:
+ *   GET /api/locations/search?q=torreon
+ *     → results con "Torreon" (city), "Coahuila" (state), "Mexico" (country)
+ *
+ *   GET /api/locations/search?q=mexico&k=5
+ *     → results empezando por:
+ *         { type: "country", country: "Mexico" }
+ *         { type: "city", country: "Mexico", state: "Ciudad de Mexico", city: "Mexico City" }
+ *         ...
+ */
+export async function searchLocations(req, res) {
     try {
         const q = req.query.q || "";
-        const k = parseInt(req.query.k || DEFAULT_K);
+        const k = req.query.k;
 
-        if (!q.trim()) return res.json({ results: [] });
-
-        await loadLocationCache();
-        const docs = getAllLocations();
-
-        // TOP-K eficiente usando MinHeap
-        const results = collectMatches(docs, q, k);
-
-        // Limpia score antes de enviar
-        const cleaned = results.map(({ score, ...rest }) => rest);
-
-        return res.json({ results: cleaned });
-
+        const payload = await searchLocationsService(q, k);
+        return res.json(payload);
     } catch (err) {
         return res.status(500).json({
             error: "Error en búsqueda global",
