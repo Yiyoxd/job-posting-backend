@@ -12,7 +12,10 @@ import {
     createCompany,
     updateCompany,
     deleteCompany,
+    updateCompanyLogo
 } from "../controllers/companyController.js";
+
+import { uploadCompanyLogo } from "../middlewares/uploadLogo.js";
 
 const router = express.Router();
 
@@ -21,6 +24,9 @@ router.get("/", getCompanies);
 
 // Opciones para filtros del frontend
 router.get("/filters/options", getCompanyFilterOptions);
+
+// ✅ NUEVO: Actualizar logo (multipart/form-data)
+router.put("/:id/logo", uploadCompanyLogo, updateCompanyLogo);
 
 // Empleos de una empresa
 router.get("/:id/jobs", getCompanyJobs);

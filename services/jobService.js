@@ -244,7 +244,6 @@ function cleanJobObject(job) {
  *      state,
  *      city,
  *      address,
- *      url,
  *      company_size_min,
  *      company_size_max,
  *      logo  // FULL URL: "<ASSET_BASE_URL>/company_logos/processed/<id>.png"
@@ -313,7 +312,6 @@ async function attachCompanyAndFormatJobs(rawJobs = []) {
                 state: rest.state ?? null,
                 city: rest.city ?? null,
                 address: rest.address ?? null,
-                url: rest.url ?? null,
                 company_size_min: rest.company_size_min ?? null,
                 company_size_max: rest.company_size_max ?? null,
                 logo
@@ -342,7 +340,6 @@ async function attachCompanyAndFormatJobs(rawJobs = []) {
                 state: job.state ?? null,
                 city: job.city ?? null,
                 address: null,
-                url: null,
                 company_size_min: null,
                 company_size_max: null,
                 logo: buildLogoFullPath(companyId)
@@ -877,7 +874,6 @@ async function listJobs(
  *           state,
  *           city,
  *           address,
- *           url,
  *           company_size_min,
  *           company_size_max,
  *           logo // URL absoluta del logo

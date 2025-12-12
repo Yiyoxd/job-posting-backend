@@ -79,7 +79,8 @@ import {
     getCompanyFilterOptionsService,
     createCompanyService,
     updateCompanyService,
-    deleteCompanyService
+    deleteCompanyService,
+    updateCompanyLogoService
 } from "../services/companyService.js";
 
 /* =============================================================================
@@ -241,6 +242,39 @@ export async function deleteCompany(req, res) {
     } catch (err) {
         return res.status(500).json({
             error: "Error al eliminar empresa",
+            details: err.message
+        });
+    }
+}
+
+/* =============================================================================
+ *  PUT /api/companies/:id/logo — Actualizar logo de empresa
+ * =============================================================================
+ *
+ * Request:
+ *   - multipart/form-data
+ *   - field "logo" (file)
+ *
+ * Resultado:
+ *   - Regresa la empresa con logo_full_path (misma forma que /:id)
+ */
+export async function updateCompanyLogo(req, res) {
+    try {
+        if (!req.file || !req.file.buffer) {
+            return res.status(400).json({ error: "Falta archivo 'logo' (multipart/form-data)" });
+        }
+
+        const updated = await updateCompanyLogoService(req.params.id, req.file.buffer);
+
+        if (!updated) {
+            return res.status(404).json({ error: "Empresa no encontrada" });
+        }
+
+        return res.json(updated);
+
+    } catch (err) {
+        return res.status(500).json({
+            error: "Error al actualizar logo de la empresa",
             details: err.message
         });
     }

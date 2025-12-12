@@ -39,6 +39,12 @@
 
 import Company from "../models/Company.js";
 import Job from "../models/Job.js";
+import fs from "fs";
+import path from "path";
+import sharp from "sharp";
+
+import { standardizeLogo, DEFAULT_LOGO_SIZE } from "../utils/imageProcessor.js";
+
 
 /* ============================================================================
  *  LOGO FULLPATH (MISMA LÓGICA QUE EN JOBS: TODO POR CONSTANTES)
@@ -817,4 +823,62 @@ export async function updateCompanyService(id, payload) {
 export async function deleteCompanyService(id) {
     const deleted = await Company.findByIdAndDelete(id);
     return { deleted: Boolean(deleted) };
+}
+
+/* ============================================================================
+ *  LOGO UPLOAD (GUARDAR EN ORIGINAL + PROCESSED CON company_id.png)
+ * ============================================================================
+ *
+ * Reglas:
+ * - Se guarda SIEMPRE como: <company_id>.png
+ * - Se escribe en:
+ *     data/company_logos/original/<company_id>.png
+ *     data/company_logos/processed/<company_id>.png
+ *
+ * - NO usa temp.
+ * - Si ya existe, se sobrescribe.
+ *
+ * @param {string} mongoCompanyId - _id de Mongo (req.params.id).
+ * @param {Buffer} fileBuffer - req.file.buffer (multer memoryStorage).
+ *
+ * @returns {Promise<object|null>}
+ *   - Empresa con logo_full_path si existe
+ *   - null si no existe
+ */
+export async function updateCompanyLogoService(mongoCompanyId, fileBuffer) {
+    const company = await Company.findById(mongoCompanyId).lean();
+    if (!company) return null;
+
+    const companyId = company.company_id;
+
+    if (companyId === undefined || companyId === null) {
+        throw new Error("La empresa no tiene company_id (no se puede nombrar el logo).");
+    }
+
+    const ROOT = process.cwd();
+    const BASE_DIR = path.join(ROOT, "data", "company_logos");
+    const ORIGINAL_DIR = path.join(BASE_DIR, "original");
+    const PROCESSED_DIR = path.join(BASE_DIR, "processed");
+
+    // asegurar carpetas
+    if (!fs.existsSync(ORIGINAL_DIR)) fs.mkdirSync(ORIGINAL_DIR, { recursive: true });
+    if (!fs.existsSync(PROCESSED_DIR)) fs.mkdirSync(PROCESSED_DIR, { recursive: true });
+
+    const fileName = `${companyId}.png`;
+    const originalPath = path.join(ORIGINAL_DIR, fileName);
+
+    // 1) Guardar en ORIGINAL como PNG (sin temp)
+    //    (convertimos a png aunque suban jpg/webp para cumplir "<id>.png")
+    await sharp(fileBuffer).png().toFile(originalPath);
+
+    // 2) Generar PROCESSED con tu pipeline (cuadrado transparente)
+    await standardizeLogo(
+        originalPath,
+        PROCESSED_DIR,
+        DEFAULT_LOGO_SIZE,
+        fileName
+    );
+
+    // Regresar la empresa con logo_full_path (misma forma que ya usas)
+    return attachLogoFullPath(company);
 }

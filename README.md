@@ -44,8 +44,8 @@ backend/
 │       ├── original/
 │       └── processed/
 │
-├── middleware/
-│   └── middleware.js
+├── middlewares/
+│   └── middlewares.js
 │
 ├── models/
 │   ├── Company.js

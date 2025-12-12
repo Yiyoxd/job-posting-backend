@@ -5,6 +5,7 @@
  * monta rutas del API y sirve los logos de empresa.
  */
 
+import fs from "fs";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -39,6 +40,36 @@ app.use(express.json());
 /* ==========================================================
    SERVIR LOGOS (MUY IMPORTANTE)
 ========================================================== */
+// ✅ FALLBACK: si piden /company_logos/processed/<id>.png y no existe,
+// devuelve data/company_logos/original/DEFAULT_LOGO.png
+const LOGOS_BASE_DIR = path.join(__dirname, "data", "company_logos");
+const LOGOS_ORIGINAL_DIR = path.join(LOGOS_BASE_DIR, "original");
+const LOGOS_PROCESSED_DIR = path.join(LOGOS_BASE_DIR, "processed");
+const DEFAULT_LOGO_FILE = "DEFAULT_LOGO.png";
+
+app.get("/company_logos/processed/:file", (req, res) => {
+    // Evita path traversal: solo el nombre del archivo
+    const file = path.basename(req.params.file || "");
+
+    // (Opcional pero recomendado) solo permitir *.png como tu contrato
+    if (!file.toLowerCase().endsWith(".png")) {
+        return res.status(400).json({ error: "Archivo inválido" });
+    }
+
+    const processedPath = path.join(LOGOS_PROCESSED_DIR, file);
+    const fallbackPath = path.join(LOGOS_ORIGINAL_DIR, DEFAULT_LOGO_FILE);
+
+    if (fs.existsSync(processedPath)) {
+        return res.sendFile(processedPath);
+    }
+
+    if (fs.existsSync(fallbackPath)) {
+        return res.sendFile(fallbackPath);
+    }
+
+    return res.status(404).json({ error: "Logo no encontrado y DEFAULT_LOGO.png no existe" });
+});
+
 // Expone todas las imágenes en:
 //   http://localhost:8000/company_logos/processed/<id>.png
 app.use(
