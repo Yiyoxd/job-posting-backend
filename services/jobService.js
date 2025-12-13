@@ -452,7 +452,7 @@ export async function getJobByIdService(id) {
 }
 
 /**
- * Servicio: opciones de filtros para UI (distincts).
+ * Servicio: opciones de filtros para UI.
  *
  * @returns {Promise<{
  *   countries: string[],
@@ -463,25 +463,30 @@ export async function getJobByIdService(id) {
  *   pay_periods: string[]
  * }>}
  */
+let JOB_FILTER_CACHE = null;
+
 export async function getJobFilterOptionsService() {
-    const [countries, states, cities, workTypes, workLocationTypes, payPeriods] = await Promise.all([
-        Job.distinct("country"),
-        Job.distinct("state"),
-        Job.distinct("city"),
+    // 🔹 Si ya está cacheado, regresarlo
+    if (JOB_FILTER_CACHE) {
+        return JOB_FILTER_CACHE;
+    }
+
+    // 🔹 Si no, consultar Mongo UNA sola vez
+    const [workTypes, workLocationTypes, payPeriods] = await Promise.all([
         Job.distinct("work_type"),
         Job.distinct("work_location_type"),
         Job.distinct("pay_period")
     ]);
 
-    return {
-        countries: countries.filter(Boolean).sort(),
-        states: states.filter(Boolean).sort(),
-        cities: cities.filter(Boolean).sort(),
+    JOB_FILTER_CACHE = {
         work_types: workTypes.filter(Boolean).sort(),
         work_location_types: workLocationTypes.filter(Boolean).sort(),
         pay_periods: payPeriods.filter(Boolean).sort()
     };
+
+    return JOB_FILTER_CACHE;
 }
+
 
 /**
  * Servicio: crear un job.

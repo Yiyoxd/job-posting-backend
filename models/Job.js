@@ -131,4 +131,49 @@ jobSchema.set("toObject", {
     }
 });
 
+/* =============================================================================
+ *  Cálculo automático de normalized_salary
+ * =============================================================================
+ */
+
+const PAY_PERIOD_FACTORS = {
+    HOURLY: 40 * 52,
+    WEEKLY: 52,
+    BIWEEKLY: 26,
+    MONTHLY: 12,
+    YEARLY: 1
+};
+
+function computeNormalizedSalary(min, max, period) {
+    if (min == null || max == null || !period) return null;
+
+    const avg = (min + max) / 2;
+    const factor = PAY_PERIOD_FACTORS[period];
+
+    return factor ? avg * factor : null;
+}
+
+// Al CREAR
+jobSchema.pre("save", function (next) {
+    this.normalized_salary = computeNormalizedSalary(
+        this.min_salary,
+        this.max_salary,
+        this.pay_period
+    );
+    next();
+});
+
+// Al ACTUALIZAR
+jobSchema.pre("findOneAndUpdate", function (next) {
+    const update = this.getUpdate();
+
+    update.normalized_salary = computeNormalizedSalary(
+        update.min_salary ?? this._update?.min_salary,
+        update.max_salary ?? this._update?.max_salary,
+        update.pay_period ?? this._update?.pay_period
+    );
+
+    next();
+});
+
 export default mongoose.model("Job", jobSchema);

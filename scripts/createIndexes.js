@@ -9,6 +9,7 @@
  *   ✔ Jobs: ubicaciones (country, state, city)
  *   ✔ Jobs: rango salarial (min_salary, max_salary)
  *   ✔ Jobs: listed_time (fecha)
+ *   Jobs : Company id
  *
  *   ✔ Companies: ubicación (country, state, city)
  *
@@ -79,6 +80,14 @@ async function createIndexes() {
             Job.collection,
             "listed_time (fecha)",
             { listed_time: -1 },
+            {},
+            results
+        );
+
+        await createIndex(
+            Job.collection,
+            "Jobs por empresa (company_id)",
+            { company_id: 1 },
             {},
             results
         );
