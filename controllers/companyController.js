@@ -3,16 +3,19 @@
  *  companyController.js — CONTROLADOR DE EMPRESAS (DELGADO + RANKER PRO)
  * ============================================================================
  *
+ * ✅ IMPORTANTE (API pública):
+ * - El parámetro :id en estas rutas se interpreta como company_id (numérico).
+ *
  * Endpoints (ver companyRoutes.js):
  *
  *   GET  /api/companies
  *        → Listar empresas con filtros, paginación y ordenamiento.
  *
  *   GET  /api/companies/:id
- *        → Obtener una empresa por ID.
+ *        → Obtener una empresa por company_id.
  *
  *   GET  /api/companies/:id/jobs
- *        → Obtener empleos de una empresa (con filtros + paginación).
+ *        → Obtener empleos de una empresa (company_id) con filtros + paginación.
  *
  *   GET  /api/companies/filters/options
  *        → Obtener opciones para filtros de empresas.
@@ -21,10 +24,13 @@
  *        → Crear empresa.
  *
  *   PUT  /api/companies/:id
- *        → Actualizar empresa.
+ *        → Actualizar empresa por company_id.
  *
  *   DELETE /api/companies/:id
- *        → Eliminar empresa.
+ *        → Eliminar empresa por company_id.
+ *
+ *   PUT /api/companies/:id/logo
+ *        → Actualizar logo por company_id.
  *
  * Filtros en GET /api/companies:
  *   - q          → Búsqueda por nombre / descripción
@@ -35,52 +41,25 @@
  *   - max_size   → Tamaño máximo (company_size_min <= max_size)
  *
  * Paginación y orden:
- *   - page, limit (igual que en jobs)
+ *   - page, limit
  *   - sortBy  → name | createdAt | country
  *   - sortDir → asc | desc
  *
- * IMPORTANTE PARA EL FRONTEND:
- * -----------------------------
- * 1. GET /api/companies
- *    Respuesta:
- *      {
- *        "meta": { page, limit, total, totalPages },
- *        "data": [
- *          {
- *            ...campos de Company...
- *            "logo_full_path": "https://tu-backend.com/company_logos/processed/268.png"
- *          },
- *          ...
- *        ]
- *      }
- *
- *    - Cuando el cliente ENVÍA q y NO envía sortBy:
- *        → Los resultados vienen ordenados por RELEVANCIA (ranker avanzado).
- *
- *    - Cuando NO envía q, o envía q + sortBy:
- *        → Se respeta sortBy/sortDir y q se aplica como filtro regex simple.
- *
- * 2. GET /api/companies/:id
- *    Respuesta:
- *      {
- *        ...campos de Company...
- *        "logo_full_path": "..."
- *      }
- *
- * 3. POST /api/companies, PUT /api/companies/:id
- *    También regresan la empresa con logo_full_path.
+ * Respuestas:
+ * - Listado: { meta, data: [ { ...company, logo_full_path }, ... ] }
+ * - Lectura/CRUD: { ...company, logo_full_path }
  * ============================================================================
  */
 
 import {
     listCompaniesService,
-    getCompanyByIdService,
+    getCompanyByIdService,        // ⬅️ ahora resuelve por company_id
     getCompanyJobsService,
     getCompanyFilterOptionsService,
     createCompanyService,
-    updateCompanyService,
-    deleteCompanyService,
-    updateCompanyLogoService
+    updateCompanyService,         // ⬅️ ahora actualiza por company_id
+    deleteCompanyService,         // ⬅️ ahora elimina por company_id
+    updateCompanyLogoService      // ⬅️ ahora actualiza logo por company_id
 } from "../services/companyService.js";
 
 /* =============================================================================
@@ -90,11 +69,7 @@ import {
 export async function getCompanies(req, res) {
     try {
         const result = await listCompaniesService(req.query);
-
-        // result ya viene en formato:
-        // { meta: {...}, data: [ { ...company, logo_full_path }, ... ] }
         return res.json(result);
-
     } catch (err) {
         return res.status(500).json({
             error: "Error al obtener empresas",
@@ -104,7 +79,7 @@ export async function getCompanies(req, res) {
 }
 
 /* =============================================================================
- *  GET /api/companies/:id — Empresa por ID
+ *  GET /api/companies/:id — Empresa por company_id
  * =============================================================================
  */
 export async function getCompanyById(req, res) {
@@ -115,9 +90,7 @@ export async function getCompanyById(req, res) {
             return res.status(404).json({ error: "Empresa no encontrada" });
         }
 
-        // company ya incluye logo_full_path
         return res.json(company);
-
     } catch (err) {
         return res.status(500).json({
             error: "Error al obtener empresa",
@@ -127,20 +100,7 @@ export async function getCompanyById(req, res) {
 }
 
 /* =============================================================================
- *  GET /api/companies/:id/jobs — Empleos de una empresa
- * ----------------------------------------------------------------------------- *
- *  Soporta los mismos filtros que tenías:
- *   - country
- *   - state
- *   - city
- *   - work_type
- *   - pay_period
- *
- *  La respuesta se mantiene:
- *    {
- *      meta: { page, limit, total, totalPages },
- *      data: [ ...jobs ]
- *    }
+ *  GET /api/companies/:id/jobs — Empleos de una empresa (company_id)
  * =============================================================================
  */
 export async function getCompanyJobs(req, res) {
@@ -148,9 +108,7 @@ export async function getCompanyJobs(req, res) {
         const companyId = req.params.id;
 
         const result = await getCompanyJobsService(companyId, req.query);
-
         return res.json(result);
-
     } catch (err) {
         return res.status(500).json({
             error: "Error al obtener empleos de la empresa",
@@ -166,15 +124,7 @@ export async function getCompanyJobs(req, res) {
 export async function getCompanyFilterOptions(req, res) {
     try {
         const options = await getCompanyFilterOptionsService();
-
-        // options:
-        // {
-        //   countries: string[],
-        //   states:    string[],
-        //   cities:    string[]
-        // }
         return res.json(options);
-
     } catch (err) {
         return res.status(500).json({
             error: "Error al obtener opciones de filtros para empresas",
@@ -190,10 +140,7 @@ export async function getCompanyFilterOptions(req, res) {
 export async function createCompany(req, res) {
     try {
         const company = await createCompanyService(req.body);
-
-        // company ya viene con logo_full_path
         return res.status(201).json(company);
-
     } catch (err) {
         return res.status(500).json({
             error: "Error al crear empresa",
@@ -203,7 +150,7 @@ export async function createCompany(req, res) {
 }
 
 /* =============================================================================
- *  PUT /api/companies/:id — Actualizar empresa
+ *  PUT /api/companies/:id — Actualizar empresa por company_id
  * =============================================================================
  */
 export async function updateCompany(req, res) {
@@ -214,9 +161,7 @@ export async function updateCompany(req, res) {
             return res.status(404).json({ error: "Empresa no encontrada" });
         }
 
-        // updated ya viene con logo_full_path
         return res.json(updated);
-
     } catch (err) {
         return res.status(500).json({
             error: "Error al actualizar empresa",
@@ -226,7 +171,7 @@ export async function updateCompany(req, res) {
 }
 
 /* =============================================================================
- *  DELETE /api/companies/:id — Eliminar empresa
+ *  DELETE /api/companies/:id — Eliminar empresa por company_id
  * =============================================================================
  */
 export async function deleteCompany(req, res) {
@@ -238,7 +183,6 @@ export async function deleteCompany(req, res) {
         }
 
         return res.json({ message: "Empresa eliminada correctamente" });
-
     } catch (err) {
         return res.status(500).json({
             error: "Error al eliminar empresa",
@@ -248,7 +192,7 @@ export async function deleteCompany(req, res) {
 }
 
 /* =============================================================================
- *  PUT /api/companies/:id/logo — Actualizar logo de empresa
+ *  PUT /api/companies/:id/logo — Actualizar logo por company_id
  * =============================================================================
  *
  * Request:
@@ -261,7 +205,9 @@ export async function deleteCompany(req, res) {
 export async function updateCompanyLogo(req, res) {
     try {
         if (!req.file || !req.file.buffer) {
-            return res.status(400).json({ error: "Falta archivo 'logo' (multipart/form-data)" });
+            return res.status(400).json({
+                error: "Falta archivo 'logo' (multipart/form-data)"
+            });
         }
 
         const updated = await updateCompanyLogoService(req.params.id, req.file.buffer);
@@ -271,7 +217,6 @@ export async function updateCompanyLogo(req, res) {
         }
 
         return res.json(updated);
-
     } catch (err) {
         return res.status(500).json({
             error: "Error al actualizar logo de la empresa",

@@ -401,6 +401,12 @@ async function listJobs(
 export async function getJobsService(queryParams = {}) {
     const result = await listJobs(queryParams, { includeCompanyFromQuery: true });
 
+    const includeCompany = String(queryParams.include_company ?? "true").toLowerCase() !== "false";
+
+    if (!includeCompany) {
+        return { meta: result.meta, data: result.data };
+    }
+
     const jobsWithCompany = await attachCompanyAndFormatJobs(result.data, {
         CompanyModel: Company,
         buildLogoFullPath,
@@ -423,6 +429,12 @@ export async function getJobsByCompanyService(companyId, queryParams = {}) {
         includeCompanyFromQuery: false
     });
 
+    const includeCompany = String(queryParams.include_company ?? "true").toLowerCase() !== "false";
+
+    if (!includeCompany) {
+        return { meta: result.meta, data: result.data };
+    }
+
     const jobsWithCompany = await attachCompanyAndFormatJobs(result.data, {
         CompanyModel: Company,
         buildLogoFullPath,
@@ -439,8 +451,17 @@ export async function getJobsByCompanyService(companyId, queryParams = {}) {
  * @returns {Promise<Object|null>}
  */
 export async function getJobByIdService(id) {
-    const job = await Job.findById(id);
+    const jobId = Number(id);
+    if (!Number.isInteger(jobId)) return null;
+
+    const job = await Job.findOne({ job_id: jobId }).lean();
     if (!job) return null;
+
+    const includeCompany = true;
+
+    if (!includeCompany) {
+        return job;
+    }
 
     const [formatted] = await attachCompanyAndFormatJobs([job], {
         CompanyModel: Company,
@@ -455,16 +476,12 @@ export async function getJobByIdService(id) {
  * Servicio: opciones de filtros para UI.
  *
  * @returns {Promise<{
- *   countries: string[],
- *   states: string[],
- *   cities: string[],
  *   work_types: string[],
  *   work_location_types: string[],
  *   pay_periods: string[]
  * }>}
  */
 let JOB_FILTER_CACHE = null;
-
 export async function getJobFilterOptionsService() {
     // 🔹 Si ya está cacheado, regresarlo
     if (JOB_FILTER_CACHE) {
@@ -514,7 +531,15 @@ export async function createJobService(payload) {
  * @returns {Promise<Object|null>}
  */
 export async function updateJobService(id, payload) {
-    const updated = await Job.findByIdAndUpdate(id, payload, { new: true });
+    const jobId = Number(id);
+    if (!Number.isInteger(jobId)) return null;
+
+    const updated = await Job.findOneAndUpdate(
+        { job_id: jobId },
+        payload,
+        { new: true }
+    );
+
     if (!updated) return null;
 
     const [formatted] = await attachCompanyAndFormatJobs([updated], {
@@ -533,6 +558,9 @@ export async function updateJobService(id, payload) {
  * @returns {Promise<boolean>}
  */
 export async function deleteJobService(id) {
-    const deleted = await Job.findByIdAndDelete(id);
+    const jobId = Number(id);
+    if (!Number.isInteger(jobId)) return false;
+
+    const deleted = await Job.findOneAndDelete({ job_id: jobId });
     return Boolean(deleted);
 }

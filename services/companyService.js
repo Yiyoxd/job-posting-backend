@@ -2,16 +2,25 @@
 
 /**
  * ============================================================================
- * companyService.js — Capa de servicio (lógica de negocio) para Empresas (Company)
+ * companyService.js — Lógica de negocio para Empresas (Company)
  * ============================================================================
  *
- * Este módulo implementa lógica de negocio para empresas sin depender de Express
- * (no usa req/res). Expone funciones que reciben entradas “puras” (queryParams,
- * ids, payloads) y operan sobre modelos Mongoose (Company, Job).
+ * Este módulo NO depende de Express (no usa req/res).
+ * Expone funciones “puras” que operan sobre Mongoose (Company, Job).
+ *
+ * ✅ Decisión de API pública (IMPORTANTE):
+ * - Todas las operaciones “por id” usan company_id (numérico incremental).
+ * - NO se usa el _id de Mongo para GET/UPDATE/DELETE (frontend-friendly).
+ *
+ * Ejemplos esperados:
+ * - GET    /api/companies/1075         -> company_id = 1075
+ * - PATCH  /api/companies/1075         -> company_id = 1075
+ * - DELETE /api/companies/1075         -> company_id = 1075
+ * - GET    /api/companies/1075/jobs    -> company_id = 1075
+ * - POST   /api/companies/1075/logo    -> company_id = 1075
  *
  * Contrato de salida:
- * - En listados y lecturas, se devuelve { meta, data } o un objeto Company.
- * - Cuando se retorna una empresa, se incluye el campo adicional:
+ * - Cuando se retorna una empresa, se incluye:
  *     logo_full_path: string | null
  *   calculado a partir de company_id con la convención pública del backend.
  * ============================================================================
@@ -31,7 +40,7 @@ import { parseNumber, normalizeSearchTerm as normalizeSearchTermBasic } from "..
 import { buildLogoFullPath } from "../utils/assets/logoUtils.js";
 
 /* =============================================================================
- * Helpers internos de Company (ranker y normalización con acentos)
+ * Helpers internos (normalización + ranker)
  * =============================================================================
  */
 
@@ -107,6 +116,19 @@ function attachLogoFullPath(companyDocOrPlain) {
         ...plain,
         logo_full_path: buildLogoFullPath(plain.company_id)
     };
+}
+
+/**
+ * Normaliza un "id" público a número (company_id).
+ * Regresa null si no es válido.
+ * @param {any} raw
+ * @returns {number|null}
+ */
+function toCompanyId(raw) {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return null;
+    if (!Number.isInteger(n)) return null;
+    return n;
 }
 
 /* =============================================================================
@@ -343,7 +365,7 @@ async function listCompaniesRanked(queryParams = {}) {
         if (cmp !== 0) return cmp;
 
         const createdA = a.company.createdAt ? new Date(a.company.createdAt).getTime() : 0;
-        const createdB = b.company.createdAt ? new Date(b.company.createdAt).getTime() : 0;
+        const createdB = b.company.createdAt ? new Date(a.company.createdAt).getTime() : 0;
         return createdB - createdA;
     });
 
@@ -408,24 +430,36 @@ export async function listCompaniesService(queryParams = {}) {
 }
 
 /**
- * Servicio: obtener empresa por _id (Mongo).
- * @param {string} id
+ * Servicio: obtener empresa por ID público (company_id).
+ * NOTA: Se mantiene el nombre "getCompanyByIdService" para que tu controller/ruta
+ * no tenga que cambiar si ya usa /companies/:id.
+ *
+ * @param {string|number} id  -> company_id
  * @returns {Promise<Object|null>}
  */
 export async function getCompanyByIdService(id) {
-    const company = await Company.findById(id).lean();
+    const companyId = toCompanyId(id);
+    if (companyId === null) return null;
+
+    const company = await Company.findOne({ company_id: companyId }).lean();
     if (!company) return null;
+
     return attachLogoFullPath(company);
 }
 
 /**
  * Servicio: empleos de una empresa (listado simple).
  * Orden fijo: listed_time desc.
- * @param {any} companyId
+ * @param {any} companyIdRaw -> company_id
  * @param {Object} queryParams
  * @returns {Promise<{ meta: Object, data: Array }>}
  */
-export async function getCompanyJobsService(companyId, queryParams = {}) {
+export async function getCompanyJobsService(companyIdRaw, queryParams = {}) {
+    const companyId = toCompanyId(companyIdRaw);
+    if (companyId === null) {
+        return { meta: { page: 1, limit: 0, total: 0, totalPages: 1 }, data: [] };
+    }
+
     const { page, limit, skip } = buildPaginationParams(queryParams);
 
     const { country, state, city, work_type, pay_period } = queryParams;
@@ -480,24 +514,37 @@ export async function createCompanyService(payload) {
 }
 
 /**
- * Servicio: actualizar empresa.
- * @param {string} id
+ * Servicio: actualizar empresa por ID público (company_id).
+ * NOTA: Se mantiene el nombre para que tu controller/ruta no cambie.
+ *
+ * @param {string|number} id -> company_id
  * @param {Object} payload
  * @returns {Promise<Object|null>}
  */
 export async function updateCompanyService(id, payload) {
-    const updated = await Company.findByIdAndUpdate(id, payload, { new: true }).lean();
+    const companyId = toCompanyId(id);
+    if (companyId === null) return null;
+
+    const updated = await Company.findOneAndUpdate(
+        { company_id: companyId },
+        payload,
+        { new: true }
+    ).lean();
+
     if (!updated) return null;
     return attachLogoFullPath(updated);
 }
 
 /**
- * Servicio: eliminar empresa.
- * @param {string} id
+ * Servicio: eliminar empresa por ID público (company_id).
+ * @param {string|number} id -> company_id
  * @returns {Promise<{ deleted: boolean }>}
  */
 export async function deleteCompanyService(id) {
-    const deleted = await Company.findByIdAndDelete(id);
+    const companyId = toCompanyId(id);
+    if (companyId === null) return { deleted: false };
+
+    const deleted = await Company.findOneAndDelete({ company_id: companyId });
     return { deleted: Boolean(deleted) };
 }
 
@@ -507,31 +554,29 @@ export async function deleteCompanyService(id) {
  */
 
 /**
- * Actualiza el logo de una empresa.
+ * Actualiza el logo de una empresa usando ID público (company_id).
  *
  * Reglas:
- * - Nombre fijo: <company_id>.png
- * - Se sobrescribe si existe.
+ * - Nombre fijo del archivo: <company_id>.png
+ * - Se sobrescribe si existe
  * - Se guarda en:
  *     data/company_logos/original/<company_id>.png
  *     data/company_logos/processed/<company_id>.png
  *
- * Entradas típicas (desde controller con multer memoryStorage):
- * - mongoCompanyId: req.params.id
+ * Uso típico (desde controller con multer memoryStorage):
+ * - companyId: req.params.id           -> company_id
  * - fileBuffer: req.file.buffer
  *
- * @param {string} mongoCompanyId
+ * @param {string|number} companyIdRaw
  * @param {Buffer} fileBuffer
  * @returns {Promise<Object|null>} Empresa (con logo_full_path) o null si no existe
  */
-export async function updateCompanyLogoService(mongoCompanyId, fileBuffer) {
-    const company = await Company.findById(mongoCompanyId).lean();
-    if (!company) return null;
+export async function updateCompanyLogoService(companyIdRaw, fileBuffer) {
+    const companyId = toCompanyId(companyIdRaw);
+    if (companyId === null) return null;
 
-    const companyId = company.company_id;
-    if (companyId === undefined || companyId === null || String(companyId).trim() === "") {
-        throw new Error("La empresa no tiene company_id; no se puede nombrar el archivo del logo.");
-    }
+    const company = await Company.findOne({ company_id: companyId }).lean();
+    if (!company) return null;
 
     const ROOT = process.cwd();
     const BASE_DIR = path.join(ROOT, "data", "company_logos");
@@ -541,10 +586,10 @@ export async function updateCompanyLogoService(mongoCompanyId, fileBuffer) {
     if (!fs.existsSync(ORIGINAL_DIR)) fs.mkdirSync(ORIGINAL_DIR, { recursive: true });
     if (!fs.existsSync(PROCESSED_DIR)) fs.mkdirSync(PROCESSED_DIR, { recursive: true });
 
-    const fileName = `${String(companyId).trim()}.png`;
+    const fileName = `${companyId}.png`;
     const originalPath = path.join(ORIGINAL_DIR, fileName);
 
-    // 1) Persistir ORIGINAL como PNG
+    // 1) Persistir ORIGINAL como PNG (forzando salida PNG)
     await sharp(fileBuffer).png().toFile(originalPath);
 
     // 2) Generar PROCESSED cuadrado con tu pipeline (mismo nombre final)
