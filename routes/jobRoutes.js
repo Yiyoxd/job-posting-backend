@@ -191,6 +191,7 @@ import {
     getJobById,
     getJobsByCompany,
     getJobFilterOptions,
+    getJobTitleRecommendations,
     createJob,
     updateJob,
     deleteJob
@@ -259,6 +260,56 @@ router.get("/filters/options", getJobFilterOptions);
  */
 router.get("/company/:companyId", getJobsByCompany);
 
+
+/**
+ * ============================================================================
+ *  Rutas de recomendaciones (Jobs)
+ * ============================================================================
+ *
+ * Estas rutas están pensadas para UI/UX tipo:
+ *   - Autocompletado (typeahead)
+ *   - Sugerencias de búsqueda
+ *   - “Did you mean…”
+ *
+ * Importante:
+ * - NO devuelven empleos completos.
+ * - Devuelven listas cortas (sin paginación) optimizadas para usarse mientras
+ *   el usuario escribe.
+ * - La lógica de relevancia/ranking vive en el service correspondiente.
+ *
+ * ----------------------------------------------------------------------------
+ * GET /api/jobs/recommendations/titles
+ *
+ * Descripción:
+ *   Retorna sugerencias de títulos de empleo basadas en un texto parcial.
+ *   Ej: q="software" → ["Software Engineer", "Senior Software Engineer", ...]
+ *
+ * Query params:
+ *   - q (string, requerido)
+ *       Texto parcial que el usuario escribe.
+ *       Si q está vacío o no viene, se regresa suggestions: [] (200 OK)
+ *       para no romper el autocomplete del frontend.
+ *
+ *   - limit (number, opcional, default: 10)
+ *       Máximo de sugerencias a devolver.
+ *       Valores inválidos se ignoran y se usa el default.
+ *
+ * Response (200):
+ *   {
+ *     "query": "software",
+ *     "suggestions": ["Software Engineer", "Senior Software Engineer", ...]
+ *   }
+ *
+ * Ejemplo:
+ *   /api/jobs/recommendations/titles?q=software&limit=8
+ *
+ * Uso típico en frontend:
+ *   - Llamar con debounce (200–400ms)
+ *   - Mostrar en dropdown mientras el usuario teclea
+ * ============================================================================
+ */
+router.get("/recommendations/titles", getJobTitleRecommendations);
+
 /* =============================================================================
  *  GET /api/jobs/:id — Obtener empleo por ID
  * =============================================================================
@@ -287,7 +338,6 @@ router.get("/:id", getJobById);
  *      "country": "United States",
  *      "state": "California",
  *      "city": "San Francisco",
- *      "company_id": "675f1a3c2c5a9b1234567890"
  *    }
  */
 router.post("/", createJob);

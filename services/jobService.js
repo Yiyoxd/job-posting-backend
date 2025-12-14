@@ -445,19 +445,82 @@ export async function getJobsByCompanyService(companyId, queryParams = {}) {
 }
 
 /**
+ * Recomendaciones de títulos de empleo basadas en texto parcial.
+ *
+ * Ejemplo:
+ *   q = "software"
+ * → ["Software Engineer", "Senior Software Engineer", ...]
+ */
+export async function getJobTitleRecommendationsService(q, { limit = 10 } = {}) {
+    const safeQ = normalizeSearchTerm(q);
+    if (!safeQ) {
+        return [];
+    }
+
+    const regex = new RegExp(escapeRegex(safeQ), "i");
+
+    const pipeline = [
+        {
+            $match: {
+                title: regex
+            }
+        },
+        {
+            $group: {
+                _id: "$title",
+                count: { $sum: 1 }
+            }
+        },
+        {
+            $addFields: {
+                titleLower: { $toLower: "$_id" }
+            }
+        },
+        {
+            $addFields: {
+                relevance: {
+                    $cond: [
+                        { $regexMatch: { input: "$titleLower", regex: `^${escapeRegex(safeQ)}` } },
+                        2,
+                        1
+                    ]
+                }
+            }
+        },
+        {
+            $sort: {
+                relevance: -1,
+                count: -1
+            }
+        },
+        {
+            $limit: limit
+        },
+        {
+            $project: {
+                _id: 0,
+                title: "$_id"
+            }
+        }
+    ];
+
+    const results = await Job.aggregate(pipeline);
+
+    return results.map(r => r.title);
+}
+
+/**
  * Servicio: obtener un job por ID (Mongo _id).
  *
  * @param {string} id
  * @returns {Promise<Object|null>}
  */
-export async function getJobByIdService(id) {
+export async function getJobByIdService(id, { includeCompany = true } = {}) {
     const jobId = Number(id);
     if (!Number.isInteger(jobId)) return null;
 
     const job = await Job.findOne({ job_id: jobId }).lean();
     if (!job) return null;
-
-    const includeCompany = true;
 
     if (!includeCompany) {
         return job;
@@ -564,3 +627,4 @@ export async function deleteJobService(id) {
     const deleted = await Job.findOneAndDelete({ job_id: jobId });
     return Boolean(deleted);
 }
+

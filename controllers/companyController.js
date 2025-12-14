@@ -53,13 +53,12 @@
 
 import {
     listCompaniesService,
-    getCompanyByIdService,        // ⬅️ ahora resuelve por company_id
+    getCompanyByIdService,
     getCompanyJobsService,
-    getCompanyFilterOptionsService,
     createCompanyService,
-    updateCompanyService,         // ⬅️ ahora actualiza por company_id
-    deleteCompanyService,         // ⬅️ ahora elimina por company_id
-    updateCompanyLogoService      // ⬅️ ahora actualiza logo por company_id
+    updateCompanyService,
+    deleteCompanyService,
+    updateCompanyLogoService
 } from "../services/companyService.js";
 
 /* =============================================================================
@@ -112,22 +111,6 @@ export async function getCompanyJobs(req, res) {
     } catch (err) {
         return res.status(500).json({
             error: "Error al obtener empleos de la empresa",
-            details: err.message
-        });
-    }
-}
-
-/* =============================================================================
- *  GET /api/companies/filters/options — Opciones de filtros
- * =============================================================================
- */
-export async function getCompanyFilterOptions(req, res) {
-    try {
-        const options = await getCompanyFilterOptionsService();
-        return res.json(options);
-    } catch (err) {
-        return res.status(500).json({
-            error: "Error al obtener opciones de filtros para empresas",
             details: err.message
         });
     }

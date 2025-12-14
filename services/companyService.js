@@ -431,8 +431,6 @@ export async function listCompaniesService(queryParams = {}) {
 
 /**
  * Servicio: obtener empresa por ID público (company_id).
- * NOTA: Se mantiene el nombre "getCompanyByIdService" para que tu controller/ruta
- * no tenga que cambiar si ya usa /companies/:id.
  *
  * @param {string|number} id  -> company_id
  * @returns {Promise<Object|null>}
@@ -482,24 +480,6 @@ export async function getCompanyJobsService(companyIdRaw, queryParams = {}) {
     return {
         meta: { page, limit, total, totalPages },
         data: jobs
-    };
-}
-
-/**
- * Servicio: opciones de filtros para empresas (distincts).
- * @returns {Promise<{ countries: string[], states: string[], cities: string[] }>}
- */
-export async function getCompanyFilterOptionsService() {
-    const [countries, states, cities] = await Promise.all([
-        Company.distinct("country"),
-        Company.distinct("state"),
-        Company.distinct("city")
-    ]);
-
-    return {
-        countries: countries.filter(Boolean).sort(),
-        states: states.filter(Boolean).sort(),
-        cities: cities.filter(Boolean).sort()
     };
 }
 

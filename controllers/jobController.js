@@ -26,6 +26,7 @@ import {
     getJobByIdService,
     getJobsByCompanyService,
     getJobFilterOptionsService,
+    getJobTitleRecommendationsService,
     createJobService,
     updateJobService,
     deleteJobService
@@ -200,6 +201,138 @@ export async function getJobFilterOptions(req, res) {
         });
     }
 }
+
+/**
+ * =============================================================================
+ * jobRecommendationController.js
+ * =============================================================================
+ *
+ * Controlador HTTP para recomendaciones relacionadas con empleos.
+ *
+ * Este controlador NO implementa lógica de negocio.
+ * Su responsabilidad es:
+ *
+ *   - Leer parámetros de entrada desde req.query
+ *   - Validar y normalizar inputs básicos
+ *   - Delegar la lógica al service correspondiente
+ *   - Definir el contrato HTTP de salida para el frontend
+ *
+ * -----------------------------------------------------------------------------
+ * Endpoint expuesto:
+ *
+ *   GET /api/jobs/recommendations/titles
+ *
+ * Query params:
+ *   - q      (string, requerido)
+ *       Texto parcial ingresado por el usuario.
+ *       Ejemplos:
+ *         "software"
+ *         "data"
+ *         "backend"
+ *
+ *   - limit  (number, opcional, default: 10)
+ *       Número máximo de sugerencias a retornar.
+ *
+ * -----------------------------------------------------------------------------
+ * Ejemplo de request:
+ *
+ *   GET /api/jobs/recommendations/titles?q=software&limit=8
+ *
+ * -----------------------------------------------------------------------------
+ * Ejemplo de response (200 OK):
+ *
+ * {
+ *   "query": "software",
+ *   "suggestions": [
+ *     "Software Engineer",
+ *     "Senior Software Engineer",
+ *     "Backend Software Developer",
+ *     "Full Stack Software Engineer"
+ *   ]
+ * }
+ *
+ * -----------------------------------------------------------------------------
+ * Notas de diseño:
+ *
+ * - Este endpoint está pensado para:
+ *     • Autocompletado
+ *     • Sugerencias de búsqueda
+ *     • Recomendaciones semánticas simples
+ *
+ * - NO devuelve jobs completos.
+ * - NO pagina resultados.
+ * - NO aplica filtros de país, salario, etc.
+ *
+ * - Toda la lógica de ranking y relevancia vive en:
+ *     services/jobRecommendationService.js
+ *
+ * =============================================================================
+ */
+
+/**
+ * GET /api/jobs/recommendations/titles
+ *
+ * Controlador para obtener recomendaciones de títulos de empleo
+ * basadas en un texto parcial ingresado por el usuario.
+ *
+ * @param {import("express").Request} req
+ * @param {import("express").Response} res
+ * @param {import("express").NextFunction} next
+ */
+export async function getJobTitleRecommendations(req, res, next) {
+    try {
+        // ---------------------------------------------------------------------
+        // 1️⃣ Lectura de parámetros de entrada
+        // ---------------------------------------------------------------------
+        const { q, limit } = req.query;
+
+        // ---------------------------------------------------------------------
+        // 2️⃣ Validación mínima de entrada
+        // ---------------------------------------------------------------------
+        // - q es requerido
+        // - si no viene o viene vacío, se responde con arreglo vacío
+        //   (esto evita errores innecesarios en el frontend)
+        if (!q || typeof q !== "string" || !q.trim()) {
+            return res.status(200).json({
+                query: q ?? "",
+                suggestions: []
+            });
+        }
+
+        // ---------------------------------------------------------------------
+        // 3️⃣ Normalización de parámetros
+        // ---------------------------------------------------------------------
+        const parsedLimit = Number(limit);
+
+        const safeLimit =
+            Number.isInteger(parsedLimit) && parsedLimit > 0
+                ? parsedLimit
+                : 10;
+
+        // ---------------------------------------------------------------------
+        // 4️⃣ Delegar al service
+        // ---------------------------------------------------------------------
+        const suggestions = await getJobTitleRecommendationsService(q, {
+            limit: safeLimit
+        });
+
+        // ---------------------------------------------------------------------
+        // 5️⃣ Respuesta HTTP
+        // ---------------------------------------------------------------------
+        return res.status(200).json({
+            query: q,
+            suggestions
+        });
+    } catch (error) {
+        // ---------------------------------------------------------------------
+        // 6️⃣ Manejo de errores
+        // ---------------------------------------------------------------------
+        // El controlador NO decide cómo responder errores fatales.
+        // Se delega al middleware global de errores.
+        next(error);
+    }
+}
+
 
 /* =============================================================================
  *  POST /api/jobs — Crear un nuevo empleo

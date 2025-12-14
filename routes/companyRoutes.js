@@ -8,7 +8,6 @@ import {
     getCompanies,
     getCompanyById,
     getCompanyJobs,
-    getCompanyFilterOptions,
     createCompany,
     updateCompany,
     deleteCompany,
@@ -22,10 +21,7 @@ const router = express.Router();
 // Listado principal con filtros
 router.get("/", getCompanies);
 
-// Opciones para filtros del frontend
-router.get("/filters/options", getCompanyFilterOptions);
-
-// ✅ NUEVO: Actualizar logo (multipart/form-data)
+// NUEVO: Actualizar logo (multipart/form-data)
 router.put("/:id/logo", uploadCompanyLogo, updateCompanyLogo);
 
 // Empleos de una empresa
