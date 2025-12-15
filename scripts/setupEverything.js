@@ -110,6 +110,9 @@ async function setup() {
         // 3 Crear los usuarios de prueba
         await executor.run("Crear usuarios de prueba", "scripts/createUsers.js");
 
+        // 3 Crear las emmpresas chidas
+        await executor.run("Crear empresas destacadas", "scripts/featuredCompanies");
+
         // 3. Ask user if they want to run the dev server
         const runDev = await prompt.confirm("Iniciar server? (y/n): ");
 

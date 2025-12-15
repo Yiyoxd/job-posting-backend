@@ -76,7 +76,7 @@ async function seedAdmins(count) {
         const email = normalizeEmail(`admin${i}@test.com`);
 
         if (await userExists(email)) {
-            logger.info(`Admin ${i} ya existe → skip`);
+            //logger.info(`Admin ${i} ya existe → skip`);
             continue;
         }
 
@@ -88,7 +88,7 @@ async function seedAdmins(count) {
             candidate_id: null
         });
 
-        logger.success(`Admin creado → user_id=${user.user_id}, email=${email}`);
+        //logger.success(`Admin creado → user_id=${user.user_id}, email=${email}`);
     }
 }
 
@@ -103,7 +103,7 @@ async function seedCompanies(count) {
         const email = normalizeEmail(`company${i}@test.com`);
 
         if (await userExists(email)) {
-            logger.info(`Company ${i} ya existe → skip`);
+            //logger.info(`Company ${i} ya existe → skip`);
             continue;
         }
 
@@ -124,7 +124,7 @@ async function seedCompanies(count) {
                 }
             });
 
-            logger.success(`Company creada → user_id=${actor.user_id}, company_id=${actor.company_id}`);
+            //logger.success(`Company creada → user_id=${actor.user_id}, company_id=${actor.company_id}`);
         } catch (err) {
             logServiceError(err, { step: "seedCompanies", i, email });
             throw err; // fail-fast (para que no se esconda el problema)
@@ -143,7 +143,7 @@ async function seedCandidates(count) {
         const email = normalizeEmail(`candidate${i}@test.com`);
 
         if (await userExists(email)) {
-            logger.info(`Candidate ${i} ya existe → skip`);
+            //logger.info(`Candidate ${i} ya existe → skip`);
             continue;
         }
 
@@ -165,7 +165,7 @@ async function seedCandidates(count) {
                 }
             });
 
-            logger.success(`Candidate creado → user_id=${actor.user_id}, candidate_id=${actor.candidate_id}`);
+            //logger.success(`Candidate creado → user_id=${actor.user_id}, candidate_id=${actor.candidate_id}`);
         } catch (err) {
             logServiceError(err, { step: "seedCandidates", i, email });
             throw err; // fail-fast
