@@ -2,27 +2,34 @@
 
 /**
  * ============================================================================
- * companyService.js — Lógica de negocio para Empresas (Company)
+ * companyService.js — Contratos de datos para el Frontend (Companies)
  * ============================================================================
  *
- * Este módulo NO depende de Express (no usa req/res).
- * Expone funciones “puras” que operan sobre Mongoose (Company, Job).
+ * Este módulo define qué regresa el backend en cada operación relacionada con
+ * Empresas y cómo se interpretan los parámetros que el frontend envía.
  *
- * ✅ Decisión de API pública (IMPORTANTE):
- * - Todas las operaciones “por id” usan company_id (numérico incremental).
- * - NO se usa el _id de Mongo para GET/UPDATE/DELETE (frontend-friendly).
+ * Identificadores públicos (Frontend):
+ * - company_id (number) es el ID público de la empresa.
  *
- * Ejemplos esperados:
- * - GET    /api/companies/1075         -> company_id = 1075
- * - PATCH  /api/companies/1075         -> company_id = 1075
- * - DELETE /api/companies/1075         -> company_id = 1075
- * - GET    /api/companies/1075/jobs    -> company_id = 1075
- * - POST   /api/companies/1075/logo    -> company_id = 1075
+ * Campo de logo (Frontend):
+ * - Todas las respuestas de empresa incluyen:
+ *   logo_full_path: string | null
+ *   (URL absoluta o null si no existe logo procesado).
  *
- * Contrato de salida:
- * - Cuando se retorna una empresa, se incluye:
- *     logo_full_path: string | null
- *   calculado a partir de company_id con la convención pública del backend.
+ * Formatos de respuesta:
+ * - Listados:
+ *   { meta: { page, limit, total, totalPages }, data: Company[] }
+ * - Lectura/CRUD:
+ *   Company (objeto plano con logo_full_path)
+ * - Empleos de empresa:
+ *   { meta: { page, limit, total, totalPages }, data: Job[] }
+ *
+ * Autenticación (Frontend):
+ * - Lecturas (list/get/jobs): públicas.
+ * - Escrituras (create/update/delete/logo): requieren token Bearer.
+ *
+ * Errores:
+ * - Cuando hay error controlado, el controller lo traduce a JSON para el front.
  * ============================================================================
  */
 
@@ -34,27 +41,17 @@ import path from "path";
 import sharp from "sharp";
 
 import { standardizeLogo, DEFAULT_LOGO_SIZE } from "../utils/imageProcessor.js";
-
 import { buildPaginationParams } from "../utils/paginationUtils.js";
 import { parseNumber, normalizeSearchTerm as normalizeSearchTermBasic } from "../utils/parsingUtils.js";
 import { buildLogoFullPath } from "../utils/assets/logoUtils.js";
+
+import { requireActorType, requireCompanyScope, httpError } from "../utils/auth/actorAccessUtils.js";
 
 /* =============================================================================
  * Helpers internos (normalización + ranker)
  * =============================================================================
  */
 
-/**
- * Normaliza un string para comparaciones “humanas”:
- * - minúsculas
- * - normaliza unicode (NFD)
- * - elimina diacríticos
- * - reemplaza símbolos por espacios
- * - colapsa espacios
- * - trim
- * @param {string} str
- * @returns {string}
- */
 function normalizeHuman(str = "") {
     return String(str)
         .toLowerCase()
@@ -65,50 +62,52 @@ function normalizeHuman(str = "") {
         .trim();
 }
 
-/**
- * Normaliza la búsqueda `q` para ranker de empresas:
- * - trim + colapsa espacios
- * - aplica normalizeHuman
- * Si queda vacío, retorna null.
- * @param {any} qRaw
- * @returns {string|null}
- */
 function normalizeCompanySearchTerm(qRaw) {
-    const basic = normalizeSearchTermBasic(qRaw); // trim + colapsa + lower
+    const basic = normalizeSearchTermBasic(qRaw);
     if (!basic) return null;
     const n = normalizeHuman(basic);
     return n || null;
 }
 
-/**
- * Tokeniza un string normalizado en tokens únicos.
- * @param {string} str
- * @returns {string[]}
- */
 function tokenize(str = "") {
     const n = normalizeHuman(str);
     if (!n) return [];
     return [...new Set(n.split(" ").filter(Boolean))];
 }
 
-/**
- * Convierte doc/obj a plain object.
- * @param {any} doc
- * @returns {Object|null}
- */
+function stripMongoFields(obj) {
+    if (!obj || typeof obj !== "object") return obj;
+
+    const {
+        _id,
+        __v,
+        createdAt,
+        updatedAt,
+        ...rest
+    } = obj;
+
+    return rest;
+}
+
 function toPlainCompany(doc) {
     if (!doc) return null;
-    if (typeof doc.toObject === "function") return doc.toObject();
-    if (typeof doc.toJSON === "function") return doc.toJSON();
-    return { ...doc };
+
+    let plain;
+    if (typeof doc.toObject === "function") plain = doc.toObject();
+    else if (typeof doc.toJSON === "function") plain = doc.toJSON();
+    else plain = { ...doc };
+
+    return stripMongoFields(plain);
 }
 
 /**
- * Adjunta logo_full_path preservando todos los campos originales.
- * @param {any} companyDocOrPlain
+ * Adjunta el campo `logo_full_path` a una empresa.
+ *
+ * @param {Object|import("mongoose").Document} companyDocOrPlain
  * @returns {Object|null}
+ *   Company con logo_full_path (o null si entrada inválida).
  */
-function attachLogoFullPath(companyDocOrPlain) {
+export function attachLogoFullPath(companyDocOrPlain) {
     const plain = toPlainCompany(companyDocOrPlain);
     if (!plain) return null;
 
@@ -118,12 +117,6 @@ function attachLogoFullPath(companyDocOrPlain) {
     };
 }
 
-/**
- * Normaliza un "id" público a número (company_id).
- * Regresa null si no es válido.
- * @param {any} raw
- * @returns {number|null}
- */
 function toCompanyId(raw) {
     const n = Number(raw);
     if (!Number.isFinite(n)) return null;
@@ -137,15 +130,24 @@ function toCompanyId(raw) {
  */
 
 /**
- * Construye filtros para Company.
- * Soporta:
- * - q (regex simple) si includeTextFilter = true
- * - country, state, city
- * - min_size (company_size_max >= min_size)
- * - max_size (company_size_min <= max_size)
+ * Construye filtros MongoDB para listado de empresas.
+ *
+ * Query params soportados (frontend):
+ * - q: string
+ *   Búsqueda simple (regex case-insensitive) por name/description.
+ * - country: string
+ * - state: string
+ * - city: string
+ * - min_size: number|string
+ *   Filtra empresas cuyo company_size_max >= min_size.
+ * - max_size: number|string
+ *   Filtra empresas cuyo company_size_min <= max_size.
  *
  * @param {Object} queryParams
- * @param {{ includeTextFilter?: boolean }} options
+ * @param {Object} options
+ * @param {boolean} [options.includeTextFilter=true]
+ *   Si false, omite q->regex (se usa cuando el ranker avanzado evalúa por su cuenta).
+ *
  * @returns {Object}
  */
 function buildCompanyFilters(queryParams = {}, { includeTextFilter = true } = {}) {
@@ -186,9 +188,15 @@ function buildCompanyFilters(queryParams = {}, { includeTextFilter = true } = {}
 }
 
 /**
- * Ordenamiento permitido para Company.
- * sortBy: name | createdAt | country
- * sortDir: asc | desc
+ * Ordenamiento permitido en listados.
+ *
+ * Query params:
+ * - sortBy: "name" | "createdAt" | "country"
+ * - sortDir: "asc" | "desc"
+ *
+ * Defaults:
+ * - sortBy="name"
+ * - sortDir="asc"
  *
  * @param {Object} queryParams
  * @returns {Object}
@@ -208,13 +216,6 @@ function buildCompanySort(queryParams = {}) {
  * =============================================================================
  */
 
-/**
- * Calcula un score de relevancia para una empresa dada una query normalizada.
- * @param {Object} company
- * @param {string} qNorm
- * @param {string[]} qTokens
- * @returns {number}
- */
 function computeCompanyScore(company, qNorm, qTokens) {
     if (!qNorm) return 0;
 
@@ -243,7 +244,6 @@ function computeCompanyScore(company, qNorm, qTokens) {
 
     if (!hasTokenOverlap && !hasSubstring) return 0;
 
-    // 1) Coincidencias directas
     const exactName = qNorm === nameNorm ? 400 : 0;
     const prefixName = !exactName && nameNorm.startsWith(qNorm) ? 260 : 0;
     const containsName = !exactName && !prefixName && nameNorm.includes(qNorm) ? 180 : 0;
@@ -254,7 +254,6 @@ function computeCompanyScore(company, qNorm, qTokens) {
 
     const containsDesc = descNorm && descNorm.includes(qNorm) ? 90 : 0;
 
-    // 2) Tokens: coverage
     const uniqueQTokens = [...new Set(qTokens)];
     const totalTokens = uniqueQTokens.length || 1;
 
@@ -288,7 +287,6 @@ function computeCompanyScore(company, qNorm, qTokens) {
 
     const perTokenScore = matchName * 35 + matchLoc * 30 + matchDesc * 15;
 
-    // 3) Orden de tokens en nombre
     let inOrderScore = 0;
     if (tokensName.length && uniqueQTokens.length >= 2) {
         let i = 0;
@@ -302,11 +300,9 @@ function computeCompanyScore(company, qNorm, qTokens) {
         else if (inOrderRatio >= 0.5) inOrderScore = 50;
     }
 
-    // 4) Similitud de longitud
     const lenDiff = Math.abs(qNorm.length - nameNorm.length);
     const lengthScore = Math.max(0, 60 - Math.min(lenDiff, 60));
 
-    // 5) Bonus: mismos tokens en nombre y query
     const sameTokensSet =
         tokensName.length &&
         uniqueQTokens.length === tokensName.length &&
@@ -332,10 +328,18 @@ function computeCompanyScore(company, qNorm, qTokens) {
 }
 
 /**
- * Listado con ranking avanzado (q presente, sortBy ausente).
- * Aplica filtros base SIN q, calcula score en memoria y pagina.
+ * Listado con ranking inteligente.
+ *
+ * Se usa cuando:
+ * - existe q
+ * - y el frontend NO envía sortBy
+ *
+ * Respuesta:
+ * - { meta, data }
+ * - data: Company[] con logo_full_path
+ *
  * @param {Object} queryParams
- * @returns {Promise<{ meta: Object, data: Array }>}
+ * @returns {Promise<{ meta: {page:number,limit:number,total:number,totalPages:number}, data: Object[] }>}
  */
 async function listCompaniesRanked(queryParams = {}) {
     const { page, limit } = buildPaginationParams(queryParams);
@@ -383,9 +387,10 @@ async function listCompaniesRanked(queryParams = {}) {
 }
 
 /**
- * Listado simple: filtros + regex(q) + sortBy/sortDir + paginación en Mongo.
+ * Listado con filtros + sort (sin ranking).
+ *
  * @param {Object} queryParams
- * @returns {Promise<{ meta: Object, data: Array }>}
+ * @returns {Promise<{ meta: {page:number,limit:number,total:number,totalPages:number}, data: Object[] }>}
  */
 async function listCompaniesSimple(queryParams = {}) {
     const { page, limit, skip } = buildPaginationParams(queryParams);
@@ -407,16 +412,33 @@ async function listCompaniesSimple(queryParams = {}) {
 }
 
 /* =============================================================================
- * Servicios expuestos
+ * Servicios expuestos (lo que consume el controller)
  * =============================================================================
  */
 
 /**
- * Servicio: listado de empresas.
- * - Si hay q normalizada y NO hay sortBy => ranking avanzado.
- * - En cualquier otro caso => listado simple.
- * @param {Object} queryParams
- * @returns {Promise<{ meta: Object, data: Array }>}
+ * Lista empresas (pública).
+ *
+ * Query params (frontend):
+ * - q: string
+ * - country: string
+ * - state: string
+ * - city: string
+ * - min_size: number|string
+ * - max_size: number|string
+ * - page: number|string (default: 1)
+ * - limit: number|string (default: 20)
+ * - sortBy: "name"|"createdAt"|"country"
+ * - sortDir: "asc"|"desc"
+ *
+ * Regla de ranking:
+ * - Si q existe y NO hay sortBy, se aplica ranking inteligente.
+ *
+ * Respuesta:
+ * - { meta, data: Company[] }
+ *
+ * @param {Object} [queryParams={}]
+ * @returns {Promise<{ meta: {page:number,limit:number,total:number,totalPages:number}, data: Object[] }>}
  */
 export async function listCompaniesService(queryParams = {}) {
     const safeQ = normalizeCompanySearchTerm(queryParams.q);
@@ -430,10 +452,11 @@ export async function listCompaniesService(queryParams = {}) {
 }
 
 /**
- * Servicio: obtener empresa por ID público (company_id).
+ * Obtiene una empresa por company_id (pública).
  *
- * @param {string|number} id  -> company_id
+ * @param {string|number} id
  * @returns {Promise<Object|null>}
+ * - Company con logo_full_path, o null si no existe / id inválido.
  */
 export async function getCompanyByIdService(id) {
     const companyId = toCompanyId(id);
@@ -446,11 +469,26 @@ export async function getCompanyByIdService(id) {
 }
 
 /**
- * Servicio: empleos de una empresa (listado simple).
- * Orden fijo: listed_time desc.
- * @param {any} companyIdRaw -> company_id
- * @param {Object} queryParams
- * @returns {Promise<{ meta: Object, data: Array }>}
+ * Lista empleos de una empresa (pública).
+ *
+ * Path param (frontend):
+ * - companyIdRaw: company_id
+ *
+ * Query params (frontend):
+ * - page: number|string (default: 1)
+ * - limit: number|string (default: 20)
+ * - country: string
+ * - state: string
+ * - city: string
+ * - work_type: string
+ * - pay_period: string
+ *
+ * Respuesta:
+ * - { meta, data: Job[] }
+ *
+ * @param {string|number} companyIdRaw
+ * @param {Object} [queryParams={}]
+ * @returns {Promise<{ meta: {page:number,limit:number,total:number,totalPages:number}, data: Object[] }>}
  */
 export async function getCompanyJobsService(companyIdRaw, queryParams = {}) {
     const companyId = toCompanyId(companyIdRaw);
@@ -479,31 +517,76 @@ export async function getCompanyJobsService(companyIdRaw, queryParams = {}) {
 
     return {
         meta: { page, limit, total, totalPages },
-        data: jobs
+        data: jobs.map(stripMongoFields)
     };
 }
 
 /**
- * Servicio: crear empresa.
+ * Crea una empresa (requiere autenticación).
+ *
+ * Auth (frontend):
+ * - Authorization: Bearer <token>
+ *
+ * Permisos:
+ * - admin  : permitido
+ * - company: permitido SOLO si esa cuenta aún no tiene perfil de empresa
+ *
+ * Body (JSON):
+ * - Campos del modelo Company (ejemplos):
+ *   {
+ *     "name": string,
+ *     "description": string,
+ *     "country": string,
+ *     "state": string,
+ *     "city": string,
+ *     "address": string,
+ *     "company_size_min": number,
+ *     "company_size_max": number
+ *   }
+ *
+ * Respuesta:
+ * - Company con logo_full_path
+ *
+ * Errores típicos:
+ * - 401/403: sin permisos
+ * - 409: si una cuenta company ya tiene perfil de empresa
+ *
+ * @param {any} actor
  * @param {Object} payload
  * @returns {Promise<Object>}
  */
-export async function createCompanyService(payload) {
+export async function createCompanyService(actor, payload) {
+    requireActorType(actor, ["admin", "company"]);
+
+    if (actor.type === "company" && actor.company_id != null) {
+        throw httpError(409, "Company profile already exists for this account");
+    }
+
     const created = await Company.create(payload);
     return attachLogoFullPath(created);
 }
 
 /**
- * Servicio: actualizar empresa por ID público (company_id).
- * NOTA: Se mantiene el nombre para que tu controller/ruta no cambie.
+ * Actualiza una empresa por company_id (requiere autenticación).
  *
- * @param {string|number} id -> company_id
+ * Auth (frontend):
+ * - Authorization: Bearer <token>
+ *
+ * Permisos:
+ * - admin  : puede actualizar cualquier empresa
+ * - company: solo su propia empresa (actor.company_id === company_id)
+ *
+ * @param {any} actor
+ * @param {string|number} id
  * @param {Object} payload
  * @returns {Promise<Object|null>}
+ * - Company actualizado con logo_full_path, o null si no existe / id inválido.
  */
-export async function updateCompanyService(id, payload) {
+export async function updateCompanyService(actor, id, payload) {
     const companyId = toCompanyId(id);
     if (companyId === null) return null;
+
+    requireCompanyScope(actor, companyId);
 
     const updated = await Company.findOneAndUpdate(
         { company_id: companyId },
@@ -516,47 +599,70 @@ export async function updateCompanyService(id, payload) {
 }
 
 /**
- * Servicio: eliminar empresa por ID público (company_id).
- * @param {string|number} id -> company_id
+ * Elimina una empresa por company_id (requiere autenticación).
+ *
+ * Auth (frontend):
+ * - Authorization: Bearer <token>
+ *
+ * Permisos:
+ * - admin  : puede eliminar cualquier empresa
+ * - company: solo su propia empresa (actor.company_id === company_id)
+ *
+ * @param {any} actor
+ * @param {string|number} id
  * @returns {Promise<{ deleted: boolean }>}
  */
-export async function deleteCompanyService(id) {
+export async function deleteCompanyService(actor, id) {
     const companyId = toCompanyId(id);
     if (companyId === null) return { deleted: false };
+
+    requireCompanyScope(actor, companyId);
 
     const deleted = await Company.findOneAndDelete({ company_id: companyId });
     return { deleted: Boolean(deleted) };
 }
 
-/* =============================================================================
- * Logo upload: guarda <company_id>.png en original y processed
- * =============================================================================
- */
-
 /**
- * Actualiza el logo de una empresa usando ID público (company_id).
+ * Actualiza el logo de una empresa (requiere autenticación).
  *
- * Reglas:
- * - Nombre fijo del archivo: <company_id>.png
- * - Se sobrescribe si existe
- * - Se guarda en:
- *     data/company_logos/original/<company_id>.png
- *     data/company_logos/processed/<company_id>.png
+ * Auth (frontend):
+ * - Authorization: Bearer <token>
  *
- * Uso típico (desde controller con multer memoryStorage):
- * - companyId: req.params.id           -> company_id
- * - fileBuffer: req.file.buffer
+ * Permisos:
+ * - admin  : permitido
+ * - company: solo su propia empresa (actor.company_id === company_id)
  *
+ * Entrada (desde controller):
+ * - fileBuffer: Buffer (archivo recibido por multipart/form-data)
+ *
+ * Persistencia (backend):
+ * - data/company_logos/original/<company_id>.png
+ * - data/company_logos/processed/<company_id>.png
+ *
+ * Respuesta:
+ * - Company con logo_full_path
+ *
+ * Errores típicos:
+ * - 400: archivo inválido
+ * - 404: empresa no existe
+ *
+ * @param {any} actor
  * @param {string|number} companyIdRaw
  * @param {Buffer} fileBuffer
- * @returns {Promise<Object|null>} Empresa (con logo_full_path) o null si no existe
+ * @returns {Promise<Object|null>}
  */
-export async function updateCompanyLogoService(companyIdRaw, fileBuffer) {
+export async function updateCompanyLogoService(actor, companyIdRaw, fileBuffer) {
     const companyId = toCompanyId(companyIdRaw);
     if (companyId === null) return null;
 
+    requireCompanyScope(actor, companyId);
+
     const company = await Company.findOne({ company_id: companyId }).lean();
     if (!company) return null;
+
+    if (!fileBuffer || !Buffer.isBuffer(fileBuffer) || fileBuffer.length === 0) {
+        throw httpError(400, "Invalid file");
+    }
 
     const ROOT = process.cwd();
     const BASE_DIR = path.join(ROOT, "data", "company_logos");
@@ -569,10 +675,7 @@ export async function updateCompanyLogoService(companyIdRaw, fileBuffer) {
     const fileName = `${companyId}.png`;
     const originalPath = path.join(ORIGINAL_DIR, fileName);
 
-    // 1) Persistir ORIGINAL como PNG (forzando salida PNG)
     await sharp(fileBuffer).png().toFile(originalPath);
-
-    // 2) Generar PROCESSED cuadrado con tu pipeline (mismo nombre final)
     await standardizeLogo(originalPath, PROCESSED_DIR, DEFAULT_LOGO_SIZE, fileName);
 
     return attachLogoFullPath(company);

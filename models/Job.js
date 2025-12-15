@@ -8,69 +8,96 @@
  */
 
 import mongoose from "mongoose";
+import Counter from "./Counter.js";
 
-const jobSchema = new mongoose.Schema({
+const jobSchema = new mongoose.Schema(
+    {
+        // Identificador interno/incremental de la vacante
+        job_id: {
+            type: Number,
+            unique: true,
+            index: true
+        },
 
-    // Identificador interno/incremental de la vacante
-    job_id: {
-        type: Number,
-        index: true
+        // Título de la vacante
+        title: {
+            type: String,
+            trim: true
+        },
+
+        // Descripción larga del puesto
+        description: String,
+
+        // Manejo de salarios
+        max_salary: Number,
+        min_salary: Number,
+        pay_period: String, // HOURLY, WEEKLY, BIWEEKLY, MONTHLY, YEARLY
+        currency: String,   // USD, MXN, EUR, etc.
+
+        // Fecha/hora en que fue publicada (si no viene, se setea sola)
+        listed_time: {
+            type: Date,
+            default: Date.now,
+            index: true
+        },
+
+        // Tipo de trabajo (FULL_TIME, PART_TIME, CONTRACT...)
+        work_type: String,
+
+        // Modalidad del trabajo (REMOTE / ONSITE / HYBRID)
+        work_location_type: {
+            type: String,
+            enum: ["ONSITE", "HYBRID", "REMOTE"],
+            index: true
+        },
+
+        // Normalización numérica usada para análisis estadístico
+        normalized_salary: Number,
+
+        // Ubicación normalizada
+        city: String,
+        state: String,
+        country: {
+            type: String,
+            index: true
+        },
+
+        // Relación con la empresa que publicó el empleo (por company_id numérico)
+        company_id: {
+            type: Number,
+            required: true,
+            index: true
+        }
     },
-
-    // Título de la vacante
-    title: {
-        type: String,
-        trim: true
-    },
-
-    // Descripción larga del puesto
-    description: String,
-
-    // Manejo de salarios
-    max_salary: Number,
-    min_salary: Number,
-    pay_period: String,   // hourly, monthly, yearly
-    currency: String,     // USD, MXN, EUR, etc.
-
-    // URL original donde se publicó el empleo
-    job_posting_url: String,
-
-    // Fecha en que fue publicada
-    listed_time: {
-        type: Date,
-        index: true
-    },
-
-    // Tipo de trabajo (FULL_TIME, PART_TIME, CONTRACT...)
-    work_type: String,
-
-    // Modalidad del trabajo (REMOTE / ONSITE / HYBRID)
-    work_location_type: {
-        type: String,
-        enum: ["ONSITE", "HYBRID", "REMOTE"],
-        index: true
-    },
-
-    // Normalización numérica usada para análisis estadístico
-    normalized_salary: Number,
-
-    // Ubicación normalizada
-    city: String,
-    state: String,
-    country: {
-        type: String,
-        index: true
-    },
-
-    // Relación con la empresa que publicó el empleo (por company_id numérico)
-    company_id: {
-        type: Number,
-        required: true,
-        index: true
+    {
+        timestamps: true // createdAt + updatedAt
     }
+);
 
-}, {
-    timestamps: true // createdAt + updatedAt
+/* =============================================================================
+ *  INCREMENTAL AUTOMÁTICO (job_id)
+ * =============================================================================
+ *
+ * - Si job_id YA viene definido → lo respeta (imports / seeds viejos)
+ * - Si NO viene definido → obtiene el siguiente valor del counter
+ */
+jobSchema.pre("save", async function (next) {
+    try {
+        if (this.job_id !== undefined && this.job_id !== null) {
+            return next();
+        }
+
+        const counter = await Counter.findOneAndUpdate(
+            { _id: "job_id" },
+            { $inc: { seq: 1 } },
+            { new: true, upsert: true }
+        );
+
+        this.job_id = counter.seq;
+        return next();
+    } catch (err) {
+        return next(err);
+    }
 });
 
 /* =============================================================================
@@ -83,27 +110,24 @@ const jobSchema = new mongoose.Schema({
  *     __v
  *     createdAt
  *     updatedAt
- * - Si company_id viene populado, también se limpia igual.
- *   (En el esquema actual company_id es Number, así que normalmente no aplica)
+ * - listed_time NO se elimina.
  * =============================================================================
  */
 jobSchema.set("toJSON", {
     versionKey: false,
     virtuals: false,
     transform: (doc, ret) => {
-        // No exponemos el id interno del Job
         delete ret._id;
         delete ret.__v;
         delete ret.createdAt;
         delete ret.updatedAt;
 
-        // Si viene company_id populado como objeto por algún motivo, también lo limpiamos
         if (ret.company_id && typeof ret.company_id === "object") {
             delete ret.company_id._id;
             delete ret.company_id.__v;
             delete ret.company_id.createdAt;
             delete ret.company_id.updatedAt;
-            delete ret.company_id.id; // por si lo hubiera puesto otro transform
+            delete ret.company_id.id;
         }
 
         return ret;
@@ -164,16 +188,30 @@ jobSchema.pre("save", function (next) {
 });
 
 // Al ACTUALIZAR
-jobSchema.pre("findOneAndUpdate", function (next) {
+jobSchema.pre("findOneAndUpdate", async function (next) {
     const update = this.getUpdate();
 
-    update.normalized_salary = computeNormalizedSalary(
-        update.min_salary ?? this._update?.min_salary,
-        update.max_salary ?? this._update?.max_salary,
-        update.pay_period ?? this._update?.pay_period
-    );
+    // Ignorar updates que no tocan salario
+    const touchesSalary =
+        update.min_salary !== undefined ||
+        update.max_salary !== undefined ||
+        update.pay_period !== undefined;
+
+    if (!touchesSalary) return next();
+
+    // Documento actual en BD
+    const doc = await this.model.findOne(this.getQuery()).lean();
+
+    if (!doc) return next();
+
+    const min = update.min_salary ?? doc.min_salary;
+    const max = update.max_salary ?? doc.max_salary;
+    const period = update.pay_period ?? doc.pay_period;
+
+    update.normalized_salary = computeNormalizedSalary(min, max, period);
 
     next();
 });
+
 
 export default mongoose.model("Job", jobSchema);

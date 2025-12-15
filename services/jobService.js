@@ -5,12 +5,30 @@
  * jobService.js — Capa de servicio (lógica de negocio) para Empleos (Jobs)
  * ============================================================================
  *
- * Este módulo implementa lógica de negocio para empleos sin depender de Express
- * (no usa req/res). Expone funciones que reciben entradas “puras” (queryParams,
- * ids, payloads) y operan sobre modelos Mongoose (Job, Company).
+ * Este módulo NO depende de Express (no usa req/res). Expone funciones que
+ * reciben entradas “puras” (queryParams, ids, payloads) y operan sobre modelos
+ * Mongoose (Job, Company).
  *
- * El formato de salida (meta + data; y en cada job un objeto `company` con su
- * `logo` como URL absoluta) forma parte del contrato consumido por el frontend.
+ * CONTRATO DE SALIDA (frontend):
+ * - Listados devuelven: { meta, data }
+ * - meta incluye: { page, limit, total, totalPages }
+ * - data contiene Jobs en formato lean + (opcional) objeto company embebido,
+ *   donde company.logo es una URL absoluta.
+ *
+ * AUTORIZACIÓN (actor):
+ * - Lecturas (GET): pueden ser públicas (actor opcional).
+ * - Escrituras (POST/PUT/DELETE): requieren actor autenticado.
+ *   - company: solo puede operar sobre sus propios empleos.
+ *   - admin  : puede operar sobre cualquier empleo.
+ *
+ * ERRORES:
+ * - Las funciones de escritura lanzan Error con:
+ *   - e.httpStatus (number)   -> sugerido para controllers HTTP
+ *   - e.code (string)         -> "unauthorized" | "forbidden" | "bad_request"
+ *
+ * Dependencias:
+ * - Job, Company (Mongoose)
+ * - Utils de paginación, parsing, filtros Mongo y transforms (logos/company)
  * ============================================================================
  */
 
@@ -19,11 +37,97 @@ import Company from "../models/Company.js";
 
 import { buildPaginationParams } from "../utils/paginationUtils.js";
 import { normalizeSearchTerm, escapeRegex } from "../utils/parsingUtils.js";
-import { applyNumericMinFilter, applyNumericMaxFilter, addDateRangeFilter } from "../utils/mongoFilterUtils.js";
+import {
+    applyNumericMinFilter,
+    applyNumericMaxFilter,
+    addDateRangeFilter
+} from "../utils/mongoFilterUtils.js";
 
 import { buildLogoFullPath } from "../utils/assets/logoUtils.js";
 import { INTERNAL_JOB_FIELDS } from "../utils/jobs/jobFields.js";
 import { attachCompanyAndFormatJobs } from "../utils/jobs/jobTransformUtils.js";
+
+/* =============================================================================
+ * Autorización de escrituras
+ * =============================================================================
+ */
+
+/**
+ * Valida que el request provenga de una empresa o un admin.
+ *
+ * @param {{ type?: string, company_id?: number }|null} actor
+ *   Actor autenticado (inyectado por middleware).
+ *
+ * @returns {{ type: "company"|"admin", company_id?: number }}
+ *   Actor validado.
+ *
+ * @throws {Error} e
+ *   - 401 (e.code="unauthorized"): si no hay actor
+ *   - 403 (e.code="forbidden")  : si el actor no es company/admin
+ */
+function requireCompanyOrAdminActor(actor) {
+    if (!actor) {
+        const e = new Error("Se requiere autenticación.");
+        e.code = "unauthorized";
+        e.httpStatus = 401;
+        throw e;
+    }
+
+    if (actor.type !== "company" && actor.type !== "admin") {
+        const e = new Error("No autorizado para administrar empleos.");
+        e.code = "forbidden";
+        e.httpStatus = 403;
+        throw e;
+    }
+
+    return actor;
+}
+
+/**
+ * Deriva el filtro de ownership para operaciones sobre un Job.
+ *
+ * Reglas:
+ * - admin  : no restringe por company_id
+ * - company: restringe al company_id del actor
+ *
+ * @param {{ type: "company"|"admin", company_id?: number }} actor
+ * @returns {Object}
+ *   Objeto filtro parcial para combinar con { job_id } en updates/deletes.
+ */
+function buildJobOwnershipFilter(actor) {
+    if (actor.type === "admin") return {};
+    return { company_id: actor.company_id };
+}
+
+/**
+ * Deriva el company_id efectivo para creación de empleo.
+ *
+ * Reglas:
+ * - company: fuerza company_id desde el actor (ignora payload.company_id)
+ * - admin  : requiere payload.company_id válido
+ *
+ * @param {{ type: "company"|"admin", company_id?: number }} actor
+ * @param {Object} payload
+ * @returns {number}
+ *   company_id efectivo para persistir.
+ *
+ * @throws {Error} e
+ *   - 400 (e.code="bad_request"): si admin no envía company_id válido
+ */
+function resolveCompanyIdForCreate(actor, payload) {
+    if (actor.type === "company") {
+        return Number(actor.company_id);
+    }
+
+    const cid = Number(payload?.company_id);
+    if (!Number.isInteger(cid)) {
+        const e = new Error("company_id es requerido para crear empleos como admin.");
+        e.code = "bad_request";
+        e.httpStatus = 400;
+        throw e;
+    }
+    return cid;
+}
 
 /* =============================================================================
  * Filtros base (sin q)
@@ -31,14 +135,28 @@ import { attachCompanyAndFormatJobs } from "../utils/jobs/jobTransformUtils.js";
  */
 
 /**
- * Construye el objeto de filtros MongoDB para consultas de Job, excluyendo `q`
- * (la búsqueda se integra por separado).
+ * Construye filtros MongoDB para consultas de Job (excluye q).
+ *
+ * queryParams soportados:
+ * - country, state, city
+ * - work_type, work_location_type, pay_period
+ * - company_id (opcional; puede excluirse vía options)
+ * - min_salary, max_salary
+ * - min_norm_salary, max_norm_salary (normalized_salary)
+ * - listed_from, listed_to (rango sobre listed_time)
  *
  * @param {Object} queryParams
- * @param {{ includeCompanyFromQuery?: boolean }} options
+ * @param {Object} options
+ * @param {boolean} [options.includeCompanyFromQuery=true]
+ *   Si false, ignora queryParams.company_id (útil cuando companyId viene “fijo”).
+ *
  * @returns {Object}
+ *   Filtro MongoDB listo para combinar con búsqueda y sort.
  */
-function buildBaseJobFilters(queryParams = {}, { includeCompanyFromQuery = true } = {}) {
+function buildBaseJobFilters(
+    queryParams = {},
+    { includeCompanyFromQuery = true } = {}
+) {
     const {
         country,
         state,
@@ -86,15 +204,19 @@ function buildBaseJobFilters(queryParams = {}, { includeCompanyFromQuery = true 
 }
 
 /* =============================================================================
- * Ordenamiento y búsqueda simple (sin ranking avanzado)
+ * Ordenamiento y búsqueda simple
  * =============================================================================
  */
 
 /**
- * Construye el objeto de ordenamiento permitido.
+ * Construye el sort permitido para listados.
+ *
+ * Campos soportados:
+ * - listed_time, min_salary, max_salary, normalized_salary, createdAt
  *
  * @param {Object} queryParams
  * @returns {Object}
+ *   Sort MongoDB (e.g. { listed_time: -1 }).
  */
 function buildJobSort(queryParams = {}) {
     const { sortBy, sortDir } = queryParams;
@@ -114,12 +236,12 @@ function buildJobSort(queryParams = {}) {
 }
 
 /**
- * Construye filter + sort final integrando `q` mediante $text o regex según el caso.
+ * Construye filter + sort final integrando `q` mediante $text o regex.
  *
  * Reglas:
- * - Si hay q y NO hay sortBy -> usa $text.
- * - Si hay q y SÍ hay sortBy -> usa regex case-insensitive.
- * - Si no hay q -> solo sort.
+ * - Si hay q y NO hay sortBy -> usa $text y sort por textScore + recencia.
+ * - Si hay q y SÍ hay sortBy -> usa regex (case-insensitive) y sort normal.
+ * - Si no hay q -> solo sort normal.
  *
  * @param {Object} queryParams
  * @param {Object} baseFilters
@@ -152,13 +274,22 @@ function buildJobQueryAndSort(queryParams = {}, baseFilters = {}) {
  */
 
 /**
- * Aplica ranking avanzado cuando:
+ * Listado con ranking avanzado cuando:
  * - existe `q`
- * - y el cliente no envía sortBy
+ * - y el cliente NO envía sortBy
+ *
+ * Salida:
+ * - { meta, data }
+ * - data contiene documentos de Job (resultado directo del aggregate)
  *
  * @param {Object} queryParams
- * @param {{ companyId?: any, includeCompanyFromQuery?: boolean }} options
- * @returns {Promise<{ meta: Object, data: Array }>}
+ * @param {Object} options
+ * @param {any}     [options.companyId=null]
+ *   Fuerza company_id en el filtro (listado por empresa).
+ * @param {boolean} [options.includeCompanyFromQuery=true]
+ *   Si false, ignora queryParams.company_id.
+ *
+ * @returns {Promise<{ meta: {page:number,limit:number,total:number,totalPages:number}, data: any[] }>}
  */
 async function listJobsRankedByQuery(
     queryParams = {},
@@ -191,32 +322,20 @@ async function listJobsRankedByQuery(
             titleLower: { $toLower: { $ifNull: ["$title", ""] } },
             descLower: { $toLower: { $ifNull: ["$description", ""] } },
             listedTimeMs: {
-                $cond: [
-                    { $ifNull: ["$listed_time", false] },
-                    { $toLong: "$listed_time" },
-                    0
-                ]
+                $cond: [{ $ifNull: ["$listed_time", false] }, { $toLong: "$listed_time" }, 0]
             }
         }
     };
 
     const titleTokenScoreExpr = {
         $add: tokens.map((t) => ({
-            $cond: [
-                { $regexMatch: { input: "$titleLower", regex: escapeRegex(t) } },
-                1,
-                0
-            ]
+            $cond: [{ $regexMatch: { input: "$titleLower", regex: escapeRegex(t) } }, 1, 0]
         }))
     };
 
     const descTokenScoreExpr = {
         $add: tokens.map((t) => ({
-            $cond: [
-                { $regexMatch: { input: "$descLower", regex: escapeRegex(t) } },
-                1,
-                0
-            ]
+            $cond: [{ $regexMatch: { input: "$descLower", regex: escapeRegex(t) } }, 1, 0]
         }))
     };
 
@@ -240,18 +359,10 @@ async function listJobsRankedByQuery(
             descTermScore: descTokenScoreExpr,
             allTermsInTitle: allTermsInTitleExpr,
             phraseInTitle: {
-                $cond: [
-                    { $regexMatch: { input: "$titleLower", regex: phraseRegexEscaped } },
-                    1,
-                    0
-                ]
+                $cond: [{ $regexMatch: { input: "$titleLower", regex: phraseRegexEscaped } }, 1, 0]
             },
             phraseInDesc: {
-                $cond: [
-                    { $regexMatch: { input: "$descLower", regex: phraseRegexEscaped } },
-                    1,
-                    0
-                ]
+                $cond: [{ $regexMatch: { input: "$descLower", regex: phraseRegexEscaped } }, 1, 0]
             },
             recencyBoost: {
                 $let: {
@@ -259,12 +370,7 @@ async function listJobsRankedByQuery(
                         ageDays: {
                             $cond: [
                                 { $gt: ["$listedTimeMs", 0] },
-                                {
-                                    $divide: [
-                                        { $subtract: [nowMs, "$listedTimeMs"] },
-                                        DAY_MS
-                                    ]
-                                },
+                                { $divide: [{ $subtract: [nowMs, "$listedTimeMs"] }, DAY_MS] },
                                 365
                             ]
                         }
@@ -300,14 +406,7 @@ async function listJobsRankedByQuery(
         }
     };
 
-    const pipeline = [
-        matchStage,
-        addFieldsBase,
-        addFieldsScores,
-        addFieldsFinalScore,
-        sortStage,
-        facetStage
-    ];
+    const pipeline = [matchStage, addFieldsBase, addFieldsScores, addFieldsFinalScore, sortStage, facetStage];
 
     const aggResult = await Job.aggregate(pipeline);
     const facet = aggResult[0] || { data: [], totalCount: [] };
@@ -331,8 +430,11 @@ async function listJobsRankedByQuery(
  * Listado simple con filtros, búsqueda (regex o $text), paginación y ordenamiento.
  *
  * @param {Object} queryParams
- * @param {{ companyId?: any, includeCompanyFromQuery?: boolean }} options
- * @returns {Promise<{ meta: Object, data: Array }>}
+ * @param {Object} options
+ * @param {any}     [options.companyId=null]
+ * @param {boolean} [options.includeCompanyFromQuery=true]
+ *
+ * @returns {Promise<{ meta: {page:number,limit:number,total:number,totalPages:number}, data: any[] }>}
  */
 async function listJobsSimple(
     queryParams = {},
@@ -364,13 +466,16 @@ async function listJobsSimple(
  */
 
 /**
- * Selecciona automáticamente:
+ * Selecciona automáticamente la estrategia de listado:
  * - ranking avanzado si hay q y no hay sortBy
  * - listado simple en cualquier otro caso
  *
  * @param {Object} queryParams
- * @param {{ companyId?: any, includeCompanyFromQuery?: boolean }} options
- * @returns {Promise<{ meta: Object, data: Array }>}
+ * @param {Object} options
+ * @param {any}     [options.companyId=null]
+ * @param {boolean} [options.includeCompanyFromQuery=true]
+ *
+ * @returns {Promise<{ meta: {page:number,limit:number,total:number,totalPages:number}, data: any[] }>}
  */
 async function listJobs(
     queryParams = {},
@@ -392,11 +497,27 @@ async function listJobs(
  */
 
 /**
- * Servicio: listado general de empleos.
- * Contrato de salida: { meta, data }, y cada job incluye `company` con `logo` absoluto.
+ * Obtiene un listado general de empleos con filtros, búsqueda, paginación y sort.
  *
- * @param {Object} queryParams
- * @returns {Promise<{ meta: Object, data: Array }>}
+ * queryParams principales:
+ * - q (string) búsqueda por texto
+ * - page (number|string), limit (number|string)
+ * - sortBy, sortDir
+ * - country, state, city
+ * - work_type, work_location_type, pay_period
+ * - company_id (opcional)
+ * - min_salary, max_salary
+ * - min_norm_salary, max_norm_salary
+ * - listed_from, listed_to
+ * - include_company ("true"|"false") -> por defecto true
+ *
+ * @param {Object} [queryParams={}]
+ *
+ * @returns {Promise<{
+ *   meta: { page:number, limit:number, total:number, totalPages:number },
+ *   data: Array<Object>
+ * }>}
+ * - data: Jobs (lean) con `company` embebida si include_company != "false".
  */
 export async function getJobsService(queryParams = {}) {
     const result = await listJobs(queryParams, { includeCompanyFromQuery: true });
@@ -417,11 +538,18 @@ export async function getJobsService(queryParams = {}) {
 }
 
 /**
- * Servicio: listado de empleos filtrado por empresa (companyId fijo).
+ * Obtiene un listado de empleos restringido a una empresa (company_id fijo).
  *
  * @param {any} companyId
- * @param {Object} queryParams
- * @returns {Promise<{ meta: Object, data: Array }>}
+ *   Identificador de empresa (company_id).
+ * @param {Object} [queryParams={}]
+ *   Mismos queryParams que getJobsService, excepto que company_id del query
+ *   se ignora (includeCompanyFromQuery=false).
+ *
+ * @returns {Promise<{
+ *   meta: { page:number, limit:number, total:number, totalPages:number },
+ *   data: Array<Object>
+ * }>}
  */
 export async function getJobsByCompanyService(companyId, queryParams = {}) {
     const result = await listJobs(queryParams, {
@@ -447,9 +575,14 @@ export async function getJobsByCompanyService(companyId, queryParams = {}) {
 /**
  * Recomendaciones de títulos de empleo basadas en texto parcial.
  *
- * Ejemplo:
- *   q = "software"
- * → ["Software Engineer", "Senior Software Engineer", ...]
+ * @param {string} q
+ *   Texto parcial a buscar dentro de Job.title.
+ * @param {Object} [options={}]
+ * @param {number} [options.limit=10]
+ *   Máximo de títulos recomendados.
+ *
+ * @returns {Promise<string[]>}
+ *   Lista de títulos únicos ordenados por relevancia y frecuencia.
  */
 export async function getJobTitleRecommendationsService(q, { limit = 10 } = {}) {
     const safeQ = normalizeSearchTerm(q);
@@ -460,60 +593,36 @@ export async function getJobTitleRecommendationsService(q, { limit = 10 } = {}) 
     const regex = new RegExp(escapeRegex(safeQ), "i");
 
     const pipeline = [
-        {
-            $match: {
-                title: regex
-            }
-        },
-        {
-            $group: {
-                _id: "$title",
-                count: { $sum: 1 }
-            }
-        },
-        {
-            $addFields: {
-                titleLower: { $toLower: "$_id" }
-            }
-        },
+        { $match: { title: regex } },
+        { $group: { _id: "$title", count: { $sum: 1 } } },
+        { $addFields: { titleLower: { $toLower: "$_id" } } },
         {
             $addFields: {
                 relevance: {
-                    $cond: [
-                        { $regexMatch: { input: "$titleLower", regex: `^${escapeRegex(safeQ)}` } },
-                        2,
-                        1
-                    ]
+                    $cond: [{ $regexMatch: { input: "$titleLower", regex: `^${escapeRegex(safeQ)}` } }, 2, 1]
                 }
             }
         },
-        {
-            $sort: {
-                relevance: -1,
-                count: -1
-            }
-        },
-        {
-            $limit: limit
-        },
-        {
-            $project: {
-                _id: 0,
-                title: "$_id"
-            }
-        }
+        { $sort: { relevance: -1, count: -1 } },
+        { $limit: limit },
+        { $project: { _id: 0, title: "$_id" } }
     ];
 
     const results = await Job.aggregate(pipeline);
-
-    return results.map(r => r.title);
+    return results.map((r) => r.title);
 }
 
 /**
- * Servicio: obtener un job por ID (Mongo _id).
+ * Obtiene un Job por su identificador público (job_id).
  *
- * @param {string} id
+ * @param {string|number} id
+ *   job_id incremental.
+ * @param {Object} [options={}]
+ * @param {boolean} [options.includeCompany=true]
+ *   Si true, adjunta el objeto company con logo absoluto.
+ *
  * @returns {Promise<Object|null>}
+ *   - Job formateado (con company si aplica) o null si no existe/ID inválido.
  */
 export async function getJobByIdService(id, { includeCompany = true } = {}) {
     const jobId = Number(id);
@@ -536,7 +645,10 @@ export async function getJobByIdService(id, { includeCompany = true } = {}) {
 }
 
 /**
- * Servicio: opciones de filtros para UI.
+ * Obtiene opciones para construir filtros en UI.
+ *
+ * Cache:
+ * - Se cachea en memoria del proceso (JOB_FILTER_CACHE) después de la 1ra llamada.
  *
  * @returns {Promise<{
  *   work_types: string[],
@@ -546,12 +658,10 @@ export async function getJobByIdService(id, { includeCompany = true } = {}) {
  */
 let JOB_FILTER_CACHE = null;
 export async function getJobFilterOptionsService() {
-    // 🔹 Si ya está cacheado, regresarlo
     if (JOB_FILTER_CACHE) {
         return JOB_FILTER_CACHE;
     }
 
-    // 🔹 Si no, consultar Mongo UNA sola vez
     const [workTypes, workLocationTypes, payPeriods] = await Promise.all([
         Job.distinct("work_type"),
         Job.distinct("work_location_type"),
@@ -567,15 +677,36 @@ export async function getJobFilterOptionsService() {
     return JOB_FILTER_CACHE;
 }
 
-
 /**
- * Servicio: crear un job.
+ * Crea un Job.
  *
+ * Requiere actor:
+ * - company: crea bajo actor.company_id (payload.company_id se ignora)
+ * - admin  : puede crear para cualquier empresa, pero payload.company_id es requerido
+ *
+ * @param {{ type: "company"|"admin", company_id?: number }|null} actor
  * @param {Object} payload
+ *   Payload del Job (campos del modelo). Para admin, debe incluir company_id.
+ *
  * @returns {Promise<Object>}
+ *   Job creado y formateado (incluye company con logo absoluto).
+ *
+ * @throws {Error} e
+ *   - 401 unauthorized
+ *   - 403 forbidden
+ *   - 400 bad_request (admin sin company_id válido)
  */
-export async function createJobService(payload) {
-    const job = await Job.create(payload);
+export async function createJobService(actor, payload) {
+    const a = requireCompanyOrAdminActor(actor);
+
+    const effectiveCompanyId = resolveCompanyIdForCreate(a, payload);
+
+    const jobPayload = {
+        ...payload,
+        company_id: effectiveCompanyId
+    };
+
+    const job = await Job.create(jobPayload);
 
     const [formatted] = await attachCompanyAndFormatJobs([job], {
         CompanyModel: Company,
@@ -587,25 +718,99 @@ export async function createJobService(payload) {
 }
 
 /**
- * Servicio: actualizar un job.
+ * =============================================================================
+ * updateJobService
+ * =============================================================================
  *
- * @param {string} id
+ * Actualiza una oferta de empleo identificada por su `job_id` incremental.
+ *
+ * Reglas de autorización:
+ * - actor.type === "admin"
+ *     Puede actualizar cualquier empleo.
+ * - actor.type === "company"
+ *     Solo puede actualizar empleos cuyo `company_id` coincida con el del actor.
+ *
+ * Reglas de integridad:
+ * - El empleo debe existir.
+ * - El actor debe estar autenticado y autorizado.
+ * - Los campos derivados (ej. normalized_salary) se recalculan automáticamente
+ *   en el modelo al persistir los cambios.
+ *
+ * Convenciones de error:
+ * - 401 Unauthorized
+ *     Actor ausente o inválido.
+ * - 404 Not Found
+ *     El empleo no existe.
+ * - 403 Forbidden
+ *     El empleo existe pero el actor no tiene permisos.
+ *
+ * @param {{ type: "company"|"admin", company_id?: number }} actor
+ *   Actor autenticado que ejecuta la operación.
+ *
+ * @param {string|number} id
+ *   Identificador incremental `job_id`.
+ *
  * @param {Object} payload
- * @returns {Promise<Object|null>}
+ *   Campos del empleo a actualizar.
+ *   Solo se procesan campos válidos definidos en el modelo.
+ *
+ * @returns {Promise<Object>}
+ *   Empleo actualizado, con empresa adjunta y campos internos filtrados.
+ *
+ * @throws {Error}
+ *   Error con propiedad `status` para ser traducido a HTTP por el controller.
+ * =============================================================================
  */
-export async function updateJobService(id, payload) {
+export async function updateJobService(actor, id, payload) {
+    /* =========================================================================
+     * 1. Validación de actor
+     * ========================================================================= */
+    const a = requireCompanyOrAdminActor(actor);
+
+    /* =========================================================================
+     * 2. Validación del identificador
+     * ========================================================================= */
     const jobId = Number(id);
-    if (!Number.isInteger(jobId)) return null;
+    if (!Number.isInteger(jobId)) {
+        const e = new Error("job_id inválido: debe ser un entero.");
+        e.code = "bad_request";
+        e.httpStatus = 400;
+        throw e;
+    }
 
-    const updated = await Job.findOneAndUpdate(
-        { job_id: jobId },
-        payload,
-        { new: true }
-    );
+    /* =========================================================================
+     * 3. Verificación de existencia
+     * ========================================================================= */
+    const job = await Job.findOne({ job_id: jobId });
+    if (!job) {
+        const e = new Error(`Job no encontrado (job_id=${jobId}).`);
+        e.code = "not_found";
+        e.httpStatus = 404;
+        throw e;
+    }
 
-    if (!updated) return null;
+    /* =========================================================================
+     * 4. Autorización
+     * ========================================================================= */
+    if (a.type === "company" && job.company_id !== a.company_id) {
+        const e = new Error(
+            `Prohibido: la empresa ${a.company_id} no puede modificar el job ${jobId}.`
+        );
+        e.code = "forbidden";
+        e.httpStatus = 403;
+        throw e;
+    }
 
-    const [formatted] = await attachCompanyAndFormatJobs([updated], {
+    /* =========================================================================
+     * 5. Actualización
+     * ========================================================================= */
+    Object.assign(job, payload);
+    await job.save();
+
+    /* =========================================================================
+     * 6. Formateo de salida
+     * ========================================================================= */
+    const [formatted] = await attachCompanyAndFormatJobs([job], {
         CompanyModel: Company,
         buildLogoFullPath,
         internalJobFields: INTERNAL_JOB_FIELDS
@@ -614,17 +819,34 @@ export async function updateJobService(id, payload) {
     return formatted;
 }
 
+
+
 /**
- * Servicio: eliminar un job.
+ * Elimina un Job por job_id.
  *
- * @param {string} id
+ * Requiere actor:
+ * - company: solo puede eliminar empleos de su company_id
+ * - admin  : puede eliminar cualquier empleo
+ *
+ * @param {{ type: "company"|"admin", company_id?: number }|null} actor
+ * @param {string|number} id
+ *   job_id incremental.
+ *
  * @returns {Promise<boolean>}
+ *   true si eliminó, false si job_id inválido o no encontrado/no autorizado.
+ *
+ * @throws {Error} e
+ *   - 401 unauthorized
+ *   - 403 forbidden
  */
-export async function deleteJobService(id) {
+export async function deleteJobService(actor, id) {
+    const a = requireCompanyOrAdminActor(actor);
+
     const jobId = Number(id);
     if (!Number.isInteger(jobId)) return false;
 
-    const deleted = await Job.findOneAndDelete({ job_id: jobId });
+    const ownership = buildJobOwnershipFilter(a);
+
+    const deleted = await Job.findOneAndDelete({ job_id: jobId, ...ownership });
     return Boolean(deleted);
 }
-
