@@ -34,7 +34,9 @@ const TOP_COMPANY_IDS = [
     { id: 747, name: "Meta" },
     { id: 1076, name: "Netflix" },
     { id: 1077, name: "OpenAI" },
-    { id: 1078, name: "Citadel" }
+    { id: 1078, name: "Citadel" },
+    { id: 1079, name: "NVIDIA" },
+    { id: 1080, name: "Bloomberg" }
 ];
 
 /* =============================================================================
