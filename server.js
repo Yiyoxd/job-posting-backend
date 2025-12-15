@@ -22,6 +22,7 @@ import companyRoutes from "./routes/companyRoutes.js";
 import logoRoutes from "./routes/logoRoutes.js";
 import candidateRoutes from "./routes/candidateRoutes.js";
 import companyCandidateRoutes from "./routes/companyCandidateRoutes.js";
+import authRoutes from "./routes/authRoutes.js";
 
 dotenv.config();
 
@@ -50,6 +51,7 @@ app.use("/api/locations", locationRoutes);
 app.use("/api/companies", companyRoutes);
 app.use("/api/candidates", candidateRoutes);
 app.use("/api/companies/:company_id/candidates", companyCandidateRoutes);
+app.use("/api/auth", authRoutes);
 
 // Health
 app.get("/", (_req, res) => {
