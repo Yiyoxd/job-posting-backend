@@ -1,7 +1,4 @@
-/**
- * companyRoutes.js — RUTAS DE EMPRESAS
- */
-
+// routes/companyRoutes.js
 import express from "express";
 
 import {
@@ -15,28 +12,49 @@ import {
 } from "../controllers/companyController.js";
 
 import { uploadCompanyLogo } from "../middlewares/uploadLogo.js";
+import { authActor } from "../middlewares/authActor.js";
+import { authorizeCompanyParam } from "../middlewares/authorizeCompanyParam.js";
 
 const router = express.Router();
 
-// Listado principal con filtros
+/* -------------------------------------------------------------------------- */
+/*                                  Públicas                                  */
+/* -------------------------------------------------------------------------- */
+
 router.get("/", getCompanies);
-
-// NUEVO: Actualizar logo (multipart/form-data)
-router.put("/:id/logo", uploadCompanyLogo, updateCompanyLogo);
-
-// Empleos de una empresa
+router.get("/:id", getCompanyById);
 router.get("/:id/jobs", getCompanyJobs);
 
-// Detalle de empresa
-router.get("/:id", getCompanyById);
+/* -------------------------------------------------------------------------- */
+/*                               Protegidas                                   */
+/* -------------------------------------------------------------------------- */
 
-// Crear nueva empresa
-router.post("/", createCompany);
+// Crear nueva empresa (si solo admin crea)
+router.post("/", authActor({ required: true, roles: ["admin"] }), createCompany);
 
-// Actualizar empresa
-router.put("/:id", updateCompany);
+// Actualizar empresa (admin o esa misma empresa)
+router.put(
+    "/:id",
+    authActor({ required: true, roles: ["admin", "company"] }),
+    authorizeCompanyParam({ param: "id" }),
+    updateCompany
+);
 
-// Eliminar empresa
-router.delete("/:id", deleteCompany);
+// Eliminar empresa (admin o esa misma empresa)
+router.delete(
+    "/:id",
+    authActor({ required: true, roles: ["admin", "company"] }),
+    authorizeCompanyParam({ param: "id" }),
+    deleteCompany
+);
+
+// Actualizar logo
+router.put(
+    "/:id/logo",
+    authActor({ required: true, roles: ["admin", "company"] }),
+    authorizeCompanyParam({ param: "id" }),
+    uploadCompanyLogo,
+    updateCompanyLogo
+);
 
 export default router;

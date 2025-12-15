@@ -12,7 +12,8 @@
     "createindexes": "node scripts/createIndexes.js",
     "startdb": "node scripts/startDb.js",
     "setup": "node scripts/setupEverything.js",
-    "logos": "node scripts/standardize_logos.js"
+    "logos": "node scripts/standardize_logos.js",
+    "users": "node scripts/createUsers.js"
   },
   "keywords": [],
   "author": "",

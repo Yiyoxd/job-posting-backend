@@ -1,18 +1,4 @@
-/**
- * server.js
- *
- * Punto de arranque del backend.
- *
- * Funciones principales:
- *  - Inicializar Express
- *  - Cargar middlewares globales
- *  - Conectar a MongoDB
- *  - Registrar modelos de Mongoose
- *  - Montar rutas del API
- *  - Exponer logos de empresa (static + fallback)
- *  - Levantar el servidor HTTP
- */
-
+// server.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -20,17 +6,22 @@ import path from "path";
 
 import { logger } from "./utils/logger.js";
 import { connectDB } from "./connection/db.js";
+import { authActor } from "./middlewares/authActor.js";
 
-// Importar modelos para que Mongoose los registre
+// Registrar modelos
 import "./models/Company.js";
 import "./models/Job.js";
 import "./models/Location.js";
+import "./models/Candidate.js";
+import "./models/Application.js";
 
 // Rutas
 import jobRoutes from "./routes/jobRoutes.js";
 import locationRoutes from "./routes/locationRoutes.js";
 import companyRoutes from "./routes/companyRoutes.js";
 import logoRoutes from "./routes/logoRoutes.js";
+import candidateRoutes from "./routes/candidateRoutes.js";
+import companyCandidateRoutes from "./routes/companyCandidateRoutes.js";
 
 dotenv.config();
 
@@ -39,52 +30,33 @@ const PORT = process.env.PORT || 8000;
 const HOST = process.env.HOST || "0.0.0.0";
 const __dirname = path.resolve();
 
-/* -------------------------------------------------------------------------- */
-/*                                 Middlewares                                */
-/* -------------------------------------------------------------------------- */
+// Middlewares base
 app.use(cors());
 app.use(express.json());
 
-/* -------------------------------------------------------------------------- */
-/*                               Logos de empresa                              */
-/* -------------------------------------------------------------------------- */
-/*
- * - /company_logos/processed/:file → ruta con fallback controlado
- * - /company_logos/*               → archivos estáticos
- */
+// Identidad opcional para endpoints públicos
+app.use(authActor({ required: false }));
+
+// Assets públicos
 app.use("/company_logos", logoRoutes);
-app.use(
-    "/company_logos",
-    express.static(path.join(__dirname, "data/company_logos"))
-);
+app.use("/company_logos", express.static(path.join(__dirname, "data/company_logos")));
 
-logger.info("Company logos available at /company_logos");
+// DB
+connectDB(true);
 
-/* -------------------------------------------------------------------------- */
-/*                             Conexión a MongoDB                              */
-/* -------------------------------------------------------------------------- */
-connectDB();
-
-/* -------------------------------------------------------------------------- */
-/*                                  Rutas API                                  */
-/* -------------------------------------------------------------------------- */
+// API
 app.use("/api/jobs", jobRoutes);
 app.use("/api/locations", locationRoutes);
 app.use("/api/companies", companyRoutes);
+app.use("/api/candidates", candidateRoutes);
+app.use("/api/companies/:company_id/candidates", companyCandidateRoutes);
 
-/* -------------------------------------------------------------------------- */
-/*                                  Healthcheck                                */
-/* -------------------------------------------------------------------------- */
-app.get("/", (req, res) => {
-    res.json({
-        status: "ok",
-        service: "job-posting-backend"
-    });
+// Health
+app.get("/", (_req, res) => {
+    res.json({ status: "ok" });
 });
 
-/* -------------------------------------------------------------------------- */
-/*                               Arranque servidor                             */
-/* -------------------------------------------------------------------------- */
+// Start
 app.listen(PORT, HOST, () => {
     logger.success(`Server listening on http://${HOST}:${PORT}`);
 });
