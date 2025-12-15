@@ -1,17 +1,18 @@
 // routes/companyCandidateRoutes.js
-import { Router } from "express";
+import express from "express";
 import { listCandidatesForCompanyController } from "../controllers/candidateController.js";
-
 import { authActor } from "../middlewares/authActor.js";
-import { authorizeCompanyParam } from "../middlewares/authorizeCompanyParam.js";
 
-const router = Router({ mergeParams: true });
+const router = express.Router();
 
-// GET /api/companies/:company_id/candidates
+/**
+ * GET /api/companies/:company_id/candidates
+ * - company: solo su propia company_id
+ * - admin: permitido
+ */
 router.get(
-    "/",
-    authActor({ required: true, roles: ["company", "admin"] }),
-    authorizeCompanyParam({ param: "company_id" }),
+    "/:company_id/candidates",
+    authActor({ required: true, roles: ["admin", "company"] }),
     listCandidatesForCompanyController
 );
 

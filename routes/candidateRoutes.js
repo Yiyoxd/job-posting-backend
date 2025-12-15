@@ -1,50 +1,52 @@
 // routes/candidateRoutes.js
-import { Router } from "express";
+import express from "express";
 
 import {
-    createCandidateController,
     getCandidateByIdController,
     updateCandidateController,
     getCandidateCvController
 } from "../controllers/candidateController.js";
 
 import { authActor } from "../middlewares/authActor.js";
-import { authorizeCandidateParam } from "../middlewares/authorizeCandidateParam.js";
 
-const router = Router();
-
-/* -------------------------------------------------------------------------- */
-/*                                  Públicas                                  */
-/* -------------------------------------------------------------------------- */
-
-
-// crear un perfil
-router.post("/", createCandidateController);
+const router = express.Router();
 
 /* -------------------------------------------------------------------------- */
-/*                               Protegidas                                   */
+/*                                Protegidas                                  */
 /* -------------------------------------------------------------------------- */
 
-
-// Ver perfil del candidato
+/**
+ * GET /api/candidates/:candidate_id
+ * - candidate: solo su propio perfil
+ * - company: solo si existe relación por postulación (Application)
+ * - admin: permitido
+ */
 router.get(
     "/:candidate_id",
-    authActor({ required: true, roles: ["candidate", "company", "admin"] }),
+    authActor({ required: true, roles: ["admin", "company", "candidate"] }),
     getCandidateByIdController
 );
 
-// Actualizar mi perfil (solo dueño o admin)
+/**
+ * PATCH /api/candidates/:candidate_id
+ * - candidate: solo su propio perfil
+ * - admin: permitido
+ */
 router.patch(
     "/:candidate_id",
-    authActor({ required: true, roles: ["candidate", "admin"] }),
-    authorizeCandidateParam({ param: "candidate_id" }),
+    authActor({ required: true, roles: ["admin", "candidate"] }),
     updateCandidateController
 );
 
-// Descargar/ver CV (autenticado)
+/**
+ * GET /api/candidates/:candidate_id/cv
+ * - candidate: solo su propio CV
+ * - company: solo si existe relación por postulación (Application)
+ * - admin: permitido
+ */
 router.get(
     "/:candidate_id/cv",
-    authActor({ required: true, roles: ["candidate", "company", "admin"] }),
+    authActor({ required: true, roles: ["admin", "company", "candidate"] }),
     getCandidateCvController
 );
 

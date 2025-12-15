@@ -14,6 +14,7 @@ import "./models/Job.js";
 import "./models/Location.js";
 import "./models/Candidate.js";
 import "./models/Application.js";
+import "./models/FeaturedCompany.js";
 
 // Rutas
 import jobRoutes from "./routes/jobRoutes.js";

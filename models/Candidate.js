@@ -54,10 +54,6 @@ const candidateSchema = new mongoose.Schema(
             phone: {
                 type: String,
                 trim: true
-            },
-            linkedin_url: {
-                type: String,
-                trim: true
             }
         },
 

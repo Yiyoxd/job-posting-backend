@@ -89,7 +89,7 @@ function toPlainCompany(doc) {
  * @returns {Object|null}
  *   Company con logo_full_path (o null si entrada inválida).
  */
-function attachLogoFullPath(companyDocOrPlain) {
+export function attachLogoFullPath(companyDocOrPlain) {
     const plain = toPlainCompany(companyDocOrPlain);
     if (!plain) return null;
 

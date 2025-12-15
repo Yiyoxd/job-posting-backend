@@ -4,8 +4,6 @@ import mongoose from "mongoose";
 import dotenv from "dotenv";
 import { logger } from "../utils/logger.js";
 
-dotenv.config();
-
 const DEFAULT_MONGO_URI = "mongodb://127.0.0.1:27017/job_posting_db";
 
 export const connectDB = async (debug = false) => {

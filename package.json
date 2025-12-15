@@ -13,7 +13,8 @@
     "startdb": "node scripts/startDb.js",
     "setup": "node scripts/setupEverything.js",
     "logos": "node scripts/standardize_logos.js",
-    "users": "node scripts/createUsers.js"
+    "users": "node scripts/createUsers.js",
+    "featured" : "node scripts/featuredCompanies.js"
   },
   "keywords": [],
   "author": "",

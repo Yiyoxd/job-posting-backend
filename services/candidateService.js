@@ -5,25 +5,25 @@
  * candidateService.js — Servicio de Candidatos
  * ============================================================================
  *
- * Acceso (actor autenticado, independiente de OAuth/JWT/sesión)
- * - actor = { type: "candidate"|"company"|"admin", candidate_id?, company_id? }
+ * IMPORTANTE (flujo de tu sistema):
+ * - Candidate se crea en /api/auth/register cuando type="candidate".
+ * - Este servicio NO expone creación de candidato por POST /api/candidates.
  *
- * Visibilidad del perfil
+ * actor:
+ * - { user_id, type: "candidate"|"company"|"admin", candidate_id?, company_id? }
+ *
+ * Visibilidad:
  * - Candidate (dueño) / Admin:
- *   - Puede ver y editar su perfil completo.
- *   - Puede obtener su CV (si existe).
+ *   - ver y editar perfil completo
+ *   - resolver CV si existe
  *
  * - Company:
- *   - Puede ver perfil de un candidato SOLO si existe al menos una postulación
- *     de ese candidato a esa empresa (Application: { candidate_id, company_id }).
- *   - Datos visibles: candidate_id, full_name, headline, ubicación, contact.
- *   - CV: se expone como URL protegida si existe el archivo.
+ *   - puede ver candidato SOLO si existe Application (candidate_id, company_id)
+ *   - puede resolver CV bajo la misma regla
  *
- * CV (archivo en disco)
- * - Ruta: data/cv/<candidate_id>.pdf
- * - El servicio NO sirve archivos estáticos sin control de acceso.
- * - La URL del CV se calcula como endpoint protegido:
- *   /api/candidates/<candidate_id>/cv
+ * CV:
+ * - Archivo: data/cv/<candidate_id>.pdf
+ * - URL protegida: /api/candidates/<candidate_id>/cv
  * ============================================================================
  */
 
@@ -84,8 +84,7 @@ function requireSelfCompanyOrAdmin(actor, company_id) {
 }
 
 /**
- * Define si una empresa puede ver el perfil de un candidato.
- * Regla: debe existir al menos una Application (candidate_id, company_id).
+ * Regla: company puede ver candidate si existe al menos una postulación.
  */
 async function companyCanViewCandidate(company_id, candidate_id) {
     const exists = await Application.exists({ company_id, candidate_id });
@@ -93,7 +92,7 @@ async function companyCanViewCandidate(company_id, candidate_id) {
 }
 
 /* =============================================================================
- * Helpers: CV (ruta, existencia, URL protegida)
+ * Helpers: CV
  * =============================================================================
  */
 function getCvPath(candidate_id) {
@@ -109,7 +108,7 @@ function hasCvFile(candidate_id) {
 }
 
 /* =============================================================================
- * Helpers: DTOs (salida para frontend)
+ * Helpers: DTOs
  * =============================================================================
  */
 function toOwnerCandidateDTO(candidate) {
@@ -140,42 +139,6 @@ function toCompanyCandidateDTO(candidate) {
 }
 
 /* =============================================================================
- * Create
- * =============================================================================
- */
-
-/**
- * createCandidateService
- * ----------------------
- * Crea un perfil de candidato.
- *
- * Acceso:
- * - Público (NO requiere autenticación).
- *
- * Comportamiento:
- * - Siempre crea un nuevo candidato.
- *
- * Retorna:
- * - { status: "created", candidate }
- */
-export async function createCandidateService(payload) {
-    const created = await Candidate.create({
-        full_name: payload?.full_name,
-        contact: payload?.contact,
-        country: payload?.country,
-        state: payload?.state,
-        city: payload?.city,
-        headline: payload?.headline
-    });
-
-    return {
-        status: "created",
-        candidate: toOwnerCandidateDTO(created.toObject())
-    };
-}
-
-
-/* =============================================================================
  * Read
  * =============================================================================
  */
@@ -183,12 +146,10 @@ export async function createCandidateService(payload) {
 /**
  * getCandidateByIdService
  * -----------------------
- * Obtiene un candidato por candidate_id.
- *
  * Acceso:
- * - candidate: solo su propio perfil
- * - company: solo si existe relación por postulación (Application)
  * - admin: permitido
+ * - candidate: solo su propio perfil
+ * - company: solo si existe Application (candidate_id, company_id)
  *
  * Retorna:
  * - { status:"ok", candidate }
@@ -228,34 +189,56 @@ export async function getCandidateByIdService(actor, candidate_id) {
 /**
  * updateCandidateService
  * ----------------------
- * Actualiza campos del candidato con semántica PATCH (solo campos presentes).
+ * PATCH semántico (solo campos presentes).
  *
  * Acceso:
  * - candidate: solo su propio perfil
  * - admin: permitido
  *
- * Campos aceptados:
- * - full_name, contact, country, state, city, headline
- *
- * Retorna:
- * - { status:"ok", candidate }
- * - { status:"not_found" }
+ * Manejo seguro de contact:
+ * - Si payload.contact viene parcial, se hace merge con el contact actual
+ *   para no borrar contact.email (requerido por el schema).
  */
 export async function updateCandidateService(actor, candidate_id, payload = {}) {
     const cid = requirePositiveId("candidate_id", candidate_id);
     requireSelfCandidateOrAdmin(actor, cid);
 
+    const current = await Candidate.findOne({ candidate_id: cid }).lean();
+    if (!current) return { status: "not_found" };
+
     const $set = {};
+
     if (payload.full_name !== undefined) $set.full_name = payload.full_name;
-    if (payload.contact !== undefined) $set.contact = payload.contact;
     if (payload.country !== undefined) $set.country = payload.country;
     if (payload.state !== undefined) $set.state = payload.state;
     if (payload.city !== undefined) $set.city = payload.city;
     if (payload.headline !== undefined) $set.headline = payload.headline;
 
+    if (payload.contact !== undefined) {
+        if (!payload.contact || typeof payload.contact !== "object") {
+            throw makeError("invalid_payload", 400, "contact debe ser un objeto.");
+        }
+
+        const merged = {
+            ...(current.contact || {}),
+            ...payload.contact
+        };
+
+        if (!merged.email) {
+            throw makeError("invalid_payload", 400, "contact.email no puede quedar vacío.");
+        }
+
+        $set.contact = merged;
+    }
+
+    // Si no hay cambios, devuelve el actual
+    if (Object.keys($set).length === 0) {
+        return { status: "ok", candidate: toOwnerCandidateDTO(current) };
+    }
+
     const updated = await Candidate.findOneAndUpdate(
         { candidate_id: cid },
-        Object.keys($set).length ? { $set } : {},
+        { $set },
         { new: true }
     ).lean();
 
@@ -265,23 +248,10 @@ export async function updateCandidateService(actor, candidate_id, payload = {}) 
 }
 
 /* =============================================================================
- * Company: listado de candidatos visibles por empresa
+ * Company: listado de candidatos por empresa
  * =============================================================================
  */
 
-/**
- * listCandidatesForCompanyService
- * -------------------------------
- * Lista candidatos que han postulado a la empresa.
- *
- * Acceso:
- * - company: solo su propia company_id
- * - admin: permitido
- *
- * Respuesta:
- * - { status:"ok", total, page, limit, items }
- *   items[] contiene Candidate DTO (company view) + last_applied_at
- */
 export async function listCandidatesForCompanyService(actor, company_id, queryParams = {}) {
     const coid = requirePositiveId("company_id", company_id);
     requireSelfCompanyOrAdmin(actor, coid);
@@ -348,32 +318,17 @@ export async function listCandidatesForCompanyService(actor, company_id, queryPa
 }
 
 /* =============================================================================
- * CV: autorización y resolución de archivo (para endpoint protegido)
+ * CV: autorización y resolución de archivo
  * =============================================================================
  */
 
-/**
- * resolveCandidateCvService
- * -------------------------
- * Resuelve el archivo de CV si el actor tiene permiso y el archivo existe.
- *
- * Acceso:
- * - candidate: solo su propio CV
- * - company: solo si existe relación por postulación (Application)
- * - admin: permitido
- *
- * Retorna:
- * - { status:"ok", file_path }
- * - { status:"not_found" }   (si no existe candidato)
- * - { status:"no_cv" }       (si no existe archivo)
- */
 export async function resolveCandidateCvService(actor, candidate_id) {
     requireActor(actor);
 
     const cid = requirePositiveId("candidate_id", candidate_id);
 
-    const candidate = await Candidate.findOne({ candidate_id: cid }).select({ candidate_id: 1 }).lean();
-    if (!candidate) return { status: "not_found" };
+    const existsCandidate = await Candidate.exists({ candidate_id: cid });
+    if (!existsCandidate) return { status: "not_found" };
 
     if (actor.type === "admin") {
         const p = getCvPath(cid);
