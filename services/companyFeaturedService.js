@@ -62,7 +62,7 @@ function invalidateCache() {
  * GET público: Featured Companies
  * ============================================================================= */
 export async function listFeaturedCompaniesService(queryParams = {}) {
-    const limit = Math.min(Math.max(Number(queryParams.limit) || 12, 1), 50);
+    const limit = Number(queryParams.limit) || 20;
 
     const key = cacheKey(limit);
     const now = Date.now();

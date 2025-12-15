@@ -75,11 +75,29 @@ function tokenize(str = "") {
     return [...new Set(n.split(" ").filter(Boolean))];
 }
 
+function stripMongoFields(obj) {
+    if (!obj || typeof obj !== "object") return obj;
+
+    const {
+        _id,
+        __v,
+        createdAt,
+        updatedAt,
+        ...rest
+    } = obj;
+
+    return rest;
+}
+
 function toPlainCompany(doc) {
     if (!doc) return null;
-    if (typeof doc.toObject === "function") return doc.toObject();
-    if (typeof doc.toJSON === "function") return doc.toJSON();
-    return { ...doc };
+
+    let plain;
+    if (typeof doc.toObject === "function") plain = doc.toObject();
+    else if (typeof doc.toJSON === "function") plain = doc.toJSON();
+    else plain = { ...doc };
+
+    return stripMongoFields(plain);
 }
 
 /**
@@ -499,7 +517,7 @@ export async function getCompanyJobsService(companyIdRaw, queryParams = {}) {
 
     return {
         meta: { page, limit, total, totalPages },
-        data: jobs
+        data: jobs.map(stripMongoFields)
     };
 }
 
