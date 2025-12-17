@@ -1,11 +1,12 @@
 // utils/assets/logoUtils.js
+import dotenv from "dotenv";
 
 /**
  * Utilidades para construir rutas públicas de logos.
  * Centraliza la convención de URL usada por el frontend para solicitar imágenes.
  */
-
-export const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:8000";
+dotenv.config();
+export const API_BASE_URL = String(process.env.API_BASE_URL);
 export const ASSET_BASE_URL = API_BASE_URL.replace(/\/api\/?$/, "");
 
 export const LOGO_PUBLIC_PREFIX = "/company_logos";

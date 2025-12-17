@@ -1,4 +1,6 @@
 // server.js
+dotenv.config();
+
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -24,8 +26,6 @@ import logoRoutes from "./routes/logoRoutes.js";
 import candidateRoutes from "./routes/candidateRoutes.js";
 import companyCandidateRoutes from "./routes/companyCandidateRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 8000;
