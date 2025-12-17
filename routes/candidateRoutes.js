@@ -1,15 +1,18 @@
 // routes/candidateRoutes.js
 import express from "express";
+import multer from "multer";
 
 import {
     getCandidateByIdController,
     updateCandidateController,
-    getCandidateCvController
+    getCandidateCvController,
+    uploadCandidateCvController
 } from "../controllers/candidateController.js";
 
 import { authActor } from "../middlewares/authActor.js";
 
 const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
 /* -------------------------------------------------------------------------- */
 /*                                Protegidas                                  */
@@ -36,6 +39,17 @@ router.patch(
     "/:candidate_id",
     authActor({ required: true, roles: ["admin", "candidate"] }),
     updateCandidateController
+);
+
+/**
+ * POST /api/candidates/:candidate_id/cv
+ * - candidate: SOLO su propio CV
+ */
+router.post(
+    "/:candidate_id/cv",
+    authActor({ required: true, roles: ["candidate"] }),
+    upload.single("cv"),
+    uploadCandidateCvController
 );
 
 /**

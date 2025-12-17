@@ -1,14 +1,15 @@
 // server.js
-dotenv.config();
 
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+dotenv.config();
 import path from "path";
 
 import { logger } from "./utils/logger.js";
 import { connectDB } from "./connection/db.js";
 import { authActor } from "./middlewares/authActor.js";
+import { errorHandler } from "./middlewares/errorHandler.js"; // 👈 NUEVO
 
 // Registrar modelos
 import "./models/Company.js";
@@ -58,6 +59,9 @@ app.use("/api/auth", authRoutes);
 app.get("/", (_req, res) => {
     res.json({ status: "ok" });
 });
+
+// 👇 NUEVO: middleware global de errores (SIEMPRE al final)
+app.use(errorHandler);
 
 // Start
 app.listen(PORT, HOST, () => {

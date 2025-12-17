@@ -354,3 +354,74 @@ export async function resolveCandidateCvService(actor, candidate_id) {
 
     throw makeError("forbidden", 403, "No autorizado.");
 }
+
+/* =============================================================================
+ * CV: upload
+ * =============================================================================
+ */
+
+/**
+ * uploadCandidateCvService
+ * -----------------------
+ * Regla estricta:
+ * - SOLO el candidato dueño puede subir su CV
+ *
+ * Comportamiento:
+ * - Guarda el archivo como: data/cv/<candidate_id>.pdf
+ * - Sobrescribe si ya existía
+ *
+ * Espera:
+ * - file: objeto file (multer) con buffer o path temporal
+ *
+ * Retorna:
+ * - { status: "ok", cv_url }
+ * - { status: "not_found" }
+ */
+export async function uploadCandidateCvService(actor, candidate_id, file) {
+    const cid = requirePositiveId("candidate_id", candidate_id);
+
+    // 🔒 solo candidato dueño
+    requireSelfCandidateOrAdmin(actor, cid);
+    if (actor.type !== "candidate") {
+        throw makeError("forbidden", 403, "Solo el candidato puede subir su CV.");
+    }
+
+    // validar candidato
+    const existsCandidate = await Candidate.exists({ candidate_id: cid });
+    if (!existsCandidate) return { status: "not_found" };
+
+    // validar archivo
+    if (!file) {
+        throw makeError("invalid_payload", 400, "Archivo CV requerido.");
+    }
+
+    // aceptar solo PDF (mínimo indispensable)
+    const mimetype = file.mimetype || "";
+    if (mimetype !== "application/pdf") {
+        throw makeError("invalid_file", 400, "El CV debe ser un archivo PDF.");
+    }
+
+    // asegurar carpeta
+    const cvDir = path.resolve("data", "cv");
+    if (!fs.existsSync(cvDir)) {
+        fs.mkdirSync(cvDir, { recursive: true });
+    }
+
+    const targetPath = getCvPath(cid);
+
+    // soporta multer memoryStorage o diskStorage
+    if (file.buffer) {
+        fs.writeFileSync(targetPath, file.buffer);
+    } else if (file.path) {
+        fs.copyFileSync(file.path, targetPath);
+        fs.unlinkSync(file.path);
+    } else {
+        throw makeError("invalid_file", 400, "Archivo inválido.");
+    }
+
+    return {
+        status: "ok",
+        cv_url: getCvUrl(cid)
+    };
+}
+

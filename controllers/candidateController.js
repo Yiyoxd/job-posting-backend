@@ -30,7 +30,8 @@ import {
     getCandidateByIdService,
     updateCandidateService,
     listCandidatesForCompanyService,
-    resolveCandidateCvService
+    resolveCandidateCvService,
+    uploadCandidateCvService
 } from "../services/candidateService.js";
 
 /* =============================================================================
@@ -141,5 +142,45 @@ export async function getCandidateCvController(req, res) {
         return res.sendFile(out.file_path);
     } catch (err) {
         return sendError(res, err);
+    }
+}
+
+
+/* =============================================================================
+ * POST /api/candidates/:candidate_id/cv
+ * Subida del CV del candidato (PDF)
+ *
+ * Reglas:
+ * - SOLO el candidato dueño puede subir su propio CV
+ *
+ * Espera:
+ * - multipart/form-data
+ * - req.file (PDF)
+ *
+ * Respuestas:
+ * - 200 { status:"ok", cv_url }
+ * - 404 { status:"not_found" }
+ * - 403/401 { status:"error", ... }
+ * =============================================================================
+ */
+export async function uploadCandidateCvController(req, res) {
+    try {
+        const out = await uploadCandidateCvService(
+            req.actor,
+            req.params.candidate_id,
+            req.file
+        );
+
+        return res.status(200).json(out);
+    } catch (err) {
+        const httpStatus = err?.httpStatus || 500;
+        const code = err?.code || "internal_error";
+        const message = err?.message || "Error interno.";
+
+        return res.status(httpStatus).json({
+            status: "error",
+            code,
+            message
+        });
     }
 }

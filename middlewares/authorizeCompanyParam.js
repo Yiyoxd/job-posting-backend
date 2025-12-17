@@ -18,9 +18,9 @@ export function authorizeCompanyParam({ param }) {
             return res.status(401).json({ error: "UNAUTHORIZED", message: "Missing actor" });
         }
 
-        if (actor.role === "admin") return next();
+        if (actor.type === "admin") return next();
 
-        if (actor.role !== "company") {
+        if (actor.type !== "company") {
             return res.status(403).json({ error: "FORBIDDEN", message: "Company role required" });
         }
 

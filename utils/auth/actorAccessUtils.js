@@ -80,5 +80,6 @@ export function requireCompanyScope(actor, companyId) {
         if (Number.isInteger(actorCompanyId) && actorCompanyId === targetCompanyId) return;
     }
 
+    //console.log(actor, companyId)
     throw httpError(403, "Not authorized");
 }

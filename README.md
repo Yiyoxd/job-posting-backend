@@ -74,7 +74,7 @@ backend/
 │   ├── authActor.js
 │   ├── authorizeCandidateParam.js
 │   ├── authorizeCompanyParam.js
-│   ├── middleware.js
+│   ├── errorHandler.js
 │   └── uploadLogo.js
 │
 ├── models/
@@ -309,7 +309,7 @@ Middleware para carga de archivos (normalmente con `multer`):
 * Guarda temporalmente o manda buffer al controller/service.
 * Se usa antes de `updateCompanyLogo`.
 
-### `middleware.js`
+### `errorHandler.js`
 
 Suele ser un módulo para agrupar configuración de Express:
 
