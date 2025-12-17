@@ -27,6 +27,7 @@ import logoRoutes from "./routes/logoRoutes.js";
 import candidateRoutes from "./routes/candidateRoutes.js";
 import companyCandidateRoutes from "./routes/companyCandidateRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
+import applicationRoutes from "./routes/applicationRoutes.js";
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -53,6 +54,7 @@ app.use("/api/locations", locationRoutes);
 app.use("/api/companies", companyRoutes);
 app.use("/api/candidates", candidateRoutes);
 app.use("/api/companies/:company_id/candidates", companyCandidateRoutes);
+app.use("/api/applications", applicationRoutes);
 app.use("/api/auth", authRoutes);
 
 // Health
