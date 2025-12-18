@@ -46,6 +46,13 @@ router.post(
     createApplicationController
 );
 
+// Status de un candidato para un job
+router.get(
+    "/status",
+    authActor({ required: true }),
+    getApplicationStatusController
+);
+
 // Obtener postulación por ID
 router.get(
     "/:application_id",
@@ -53,12 +60,7 @@ router.get(
     getApplicationByIdController
 );
 
-// Status de un candidato para un job
-router.get(
-    "/status",
-    authActor({ required: true }),
-    getApplicationStatusController
-);
+
 
 // Status en batch (job_id -> status)
 router.post(
